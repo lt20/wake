@@ -23,7 +23,7 @@
 - [x] **T6** — Catalogue ≥ 10 obstacles dont composites (slide→kicker, kicker→slide…) — _dép : T5, T4_ — `a1e2871` 11 types, composites segmentés, textures procédurales, nextSegment, 12 tests modules.
 - [x] **T7** — Courbe de difficulté progressive (`src/difficulty.js`) — _dép : T1, T5_ — `af34ed0` difficultyForElapsed (vitesse/gaps/mix), 7 tests.
 - [x] **T8** — Son synthétisé Web Audio (`src/audio.js`) + mute — _dép : T2_ — `19b3675` synth lazy (geste requis), 7 sons + hum, mute M persistant, 8 tests.
-- [ ] **T9** — Grabs directionnels (Indy/Method/Stalefish/Nose/Tail) — _dép : T1_
+- [x] **T9** — Grabs directionnels (Indy/Method/Stalefish/Nose/Tail) — _dép : T1_ — `1f093aa` grabName pur (6 noms), direction maintenue, défaut Indy, 4 tests.
 - [ ] **T10** — Indicateur de rotation HUD — _dép : T1, T2_
 
 ## Journal
@@ -39,3 +39,4 @@
 - T6 ✅ a1e2871 — 11 types d'obstacles (dont slide→kicker, kicker→slide, A-frame, double kicker, down-slide, kink, gros slide, flat box), spawn par segment réutilisant la physique kicker/rail, textures procédurales depuis le catalogue, nextSegment. 41 tests au total.
 - T7 ✅ af34ed0 — difficulty.js : vitesse croissante (≤ MAX_SPEED), gaps qui se resserrent (≥ floor), mix de modules qui se durcit (composites tardifs), branché sur GameScene + pickModule. 48 tests au total.
 - T8 ✅ 19b3675 — audio.js : moteur Web Audio lazy (AudioContext créé seulement au 1ᵉʳ geste), 7 sons synthétisés + cable hum, mute (M) persistant via storage, branché sur les événements du jeu. 56 tests au total.
+- T9 ✅ 1f093aa — grabName(dirX,dirY) → Indy/Method/Stalefish/Nose/Tail/Mute, direction maintenue (clavier/pointeur) nomme le grab à l'atterrissage, score inchangé, règle de relâche conservée. 60 tests au total.
