@@ -178,26 +178,42 @@ export default class GameScene extends Phaser.Scene {
   // ==========================================================================
   spawnFeature() {
     const def = pickModule(() => Phaser.Math.RND.frac(), this.difficulty);
-    const worldX = this.nextSpawnX;
-    const seg = def.segments[0];
+    const baseX = this.nextSpawnX;
 
+    // Each segment is its own interactive (or decorative) piece at its offset,
+    // so composites reuse the per-piece kicker / rail physics directly.
+    for (const seg of def.segments) {
+      this.spawnSegment(def, seg, baseX + seg.offset);
+    }
+
+    const footprint = moduleFootprint(def);
+    this.nextSpawnX = baseX + footprint + Phaser.Math.Between(C.SPAWN_GAP_MIN, C.SPAWN_GAP_MAX);
+    return def;
+  }
+
+  spawnSegment(def, seg, worldX) {
     const obj = this.add
-      .image(0, 0, def.texture)
-      .setOrigin(def.origin.x, def.origin.y)
+      .image(0, 0, seg.texture)
+      .setOrigin(seg.origin.x, seg.origin.y)
       .setDepth(def.depth);
-    obj.featureType = def.type;
     obj.worldX = worldX;
-    obj.width0 = moduleFootprint(def);
+    obj.width0 = seg.width;
+    obj.moduleType = def.type;
 
     if (seg.kind === "ride-up") {
+      obj.featureType = "kicker";
+      obj.rise = seg.rise; // per-feature climb height (big kicker / A-frame)
       obj.y = C.WATER_Y; // origin (0,1) rests the ramp base on the water
     } else if (seg.kind === "grind") {
+      obj.featureType = "rail";
       obj.railTopY = C.WATER_Y - seg.surfaceDrop; // grind surface height
       obj.y = obj.railTopY - seg.imageYOffset;
+    } else {
+      obj.featureType = "decor"; // non-interactive (A-frame back face)
+      obj.y = C.WATER_Y - seg.height;
     }
 
     this.features.add(obj);
-    this.nextSpawnX = worldX + obj.width0 + Phaser.Math.Between(C.SPAWN_GAP_MIN, C.SPAWN_GAP_MAX);
     return obj;
   }
 
@@ -538,10 +554,11 @@ export default class GameScene extends Phaser.Scene {
   rideKickerOrWater() {
     const k = this.kickerUnderRider();
     if (k) {
+      const rise = k.rise || C.KICKER_RISE; // per-kicker lip height
       const t = Phaser.Math.Clamp((this.scrollX - k.worldX) / k.width0, 0, 1);
       this.rampT = t;
-      this.y = C.WATER_Y - t * C.KICKER_RISE;
-      this.rampAngle = -Math.atan2(C.KICKER_RISE, k.width0); // nose-up tilt
+      this.y = C.WATER_Y - t * rise;
+      this.rampAngle = -Math.atan2(rise, k.width0); // nose-up tilt
       if (t >= 0.9) {
         // reached the lip — pop! a tap timed here gives a perfect, bigger pop
         const now = this.time.now / 1000;

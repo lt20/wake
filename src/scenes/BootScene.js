@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { COLORS, VIRTUAL_WIDTH } from "../config.js";
-import { getModule } from "../modules.js";
+import { MODULES } from "../modules.js";
 
 // Generates every visual procedurally so the game runs with zero asset files.
 // Each texture is hand-drawn with Graphics then baked. Swap for real art later.
@@ -12,8 +12,7 @@ export default class BootScene extends Phaser.Scene {
   create() {
     this.makeBody();
     this.makeBoard();
-    this.makeKicker();
-    this.makeRail();
+    this.makeModuleTextures();
     this.makeParticles();
     this.makeSky();
     this.makeHills();
@@ -147,12 +146,24 @@ export default class BootScene extends Phaser.Scene {
     });
   }
 
-  // Kicker ramp that sits on the water and launches the rider.
-  makeKicker() {
-    // A clean triangular kicker floating on the water: flat ride-up face
-    // (the hypotenuse) rising from the water on the left to the lip on the
-    // top-right. The rider glides up this face and launches off the lip.
-    const seg = getModule("kicker").segments[0]; // dimensions from the catalogue
+  // Generate one procedural texture per distinct segment texture in the module
+  // catalogue (no binary assets). Drawn once, keyed by the segment's `texture`.
+  makeModuleTextures() {
+    const seen = new Set();
+    for (const m of MODULES) {
+      for (const s of m.segments) {
+        if (seen.has(s.texture)) continue;
+        seen.add(s.texture);
+        if (s.kind === "ride-up") this.drawRideUp(s);
+        else if (s.kind === "grind") this.drawGrind(s);
+        else if (s.kind === "decor") this.drawDecor(s);
+      }
+    }
+  }
+
+  // A triangular kicker floating on the water: flat ride-up face rising from the
+  // water (left) to the lip (top-right). The rider glides up and launches off.
+  drawRideUp(seg) {
     const w = seg.width;
     const rise = seg.rise;
     const h = seg.height;
@@ -192,26 +203,88 @@ export default class BootScene extends Phaser.Scene {
       g.strokePath();
     }
 
-    g.generateTexture("kicker", w, h);
+    g.generateTexture(seg.texture, w, h);
     g.destroy();
   }
 
-  // A slider/box that floats on the water — grindable.
-  makeRail() {
-    const seg = getModule("rail").segments[0]; // dimensions from the catalogue
+  // A slider/box that floats on the water — grindable. Flat by default; a
+  // `slopeDrop` makes a descending down-slide, a `bow` makes a kink/rainbow rail.
+  drawGrind(seg) {
+    const w = seg.width;
+    const h = seg.height;
+    const color = seg.color ?? COLORS.rail;
+
+    if (!seg.slopeDrop && !seg.bow) {
+      // flat box — original rail look (kept identical for the standard rail).
+      const g = this.g();
+      g.fillStyle(COLORS.railLeg, 1);
+      g.fillRoundedRect(18, 24, 14, h - 24, 3);
+      g.fillRoundedRect(w - 32, 24, 14, h - 24, 3);
+      g.fillStyle(color, 1);
+      g.fillRoundedRect(0, 8, w, 22, 6);
+      g.fillStyle(0xffffff, 0.4);
+      g.fillRoundedRect(6, 11, w - 12, 5, 3);
+      g.generateTexture(seg.texture, w, h);
+      g.destroy();
+      return;
+    }
+
+    // curved/sloped surface: top edge follows yAt(x) across the width.
+    const g = this.g();
+    const yAt = (x) => {
+      const tx = x / w;
+      return 8 + seg.slopeDrop * tx - seg.bow * Math.sin(Math.PI * tx);
+    };
+    const N = 24;
+    // legs at both ends, down to the texture bottom
+    g.fillStyle(COLORS.railLeg, 1);
+    g.fillRoundedRect(18, yAt(25) + 16, 14, h - (yAt(25) + 16), 3);
+    g.fillRoundedRect(w - 32, yAt(w - 25) + 16, 14, h - (yAt(w - 25) + 16), 3);
+    // surface band
+    g.fillStyle(color, 1);
+    g.beginPath();
+    g.moveTo(0, yAt(0));
+    for (let i = 1; i <= N; i++) g.lineTo((i / N) * w, yAt((i / N) * w));
+    for (let i = N; i >= 0; i--) g.lineTo((i / N) * w, yAt((i / N) * w) + 22);
+    g.closePath();
+    g.fillPath();
+    // gloss highlight
+    g.fillStyle(0xffffff, 0.4);
+    g.beginPath();
+    g.moveTo(6, yAt(6) + 3);
+    for (let i = 1; i <= N; i++) g.lineTo(6 + (i / N) * (w - 12), yAt(6 + (i / N) * (w - 12)) + 3);
+    for (let i = N; i >= 0; i--) g.lineTo(6 + (i / N) * (w - 12), yAt(6 + (i / N) * (w - 12)) + 8);
+    g.closePath();
+    g.fillPath();
+    g.generateTexture(seg.texture, w, h);
+    g.destroy();
+  }
+
+  // Cosmetic descending face (the back of an A-frame): a right triangle from the
+  // lip (top-left) down to the water (bottom-right).
+  drawDecor(seg) {
     const w = seg.width;
     const h = seg.height;
     const g = this.g();
-    // legs / floats
-    g.fillStyle(COLORS.railLeg, 1);
-    g.fillRoundedRect(18, 24, 14, h - 24, 3);
-    g.fillRoundedRect(w - 32, 24, 14, h - 24, 3);
-    // top box
-    g.fillStyle(COLORS.rail, 1);
-    g.fillRoundedRect(0, 8, w, 22, 6);
-    g.fillStyle(0xffffff, 0.4);
-    g.fillRoundedRect(6, 11, w - 12, 5, 3);
-    g.generateTexture("rail", w, h);
+    g.fillStyle(COLORS.kicker, 1);
+    g.beginPath();
+    g.moveTo(0, 0);
+    g.lineTo(w, h);
+    g.lineTo(0, h);
+    g.closePath();
+    g.fillPath();
+    g.fillStyle(0x0d3f4f, 1);
+    g.beginPath();
+    g.moveTo(0, 0);
+    g.lineTo(w, h);
+    g.lineTo(w - 10, h);
+    g.lineTo(0, 10);
+    g.closePath();
+    g.fillPath();
+    // lip coping at the peak
+    g.fillStyle(COLORS.kickerTop, 1);
+    g.fillRoundedRect(0, -2, 30, 12, 4);
+    g.generateTexture(seg.texture, w, h);
     g.destroy();
   }
 
