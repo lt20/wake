@@ -8,6 +8,7 @@ import {
   buildTrickName,
   surfaceSpinPoints,
 } from "../physics.js";
+import { pickModule, moduleFootprint } from "../modules.js";
 
 const DEG = Phaser.Math.DEG_TO_RAD;
 
@@ -176,22 +177,23 @@ export default class GameScene extends Phaser.Scene {
   // Feature spawning (kickers & rails) — recycled as they scroll off-screen
   // ==========================================================================
   spawnFeature() {
-    const type = Phaser.Math.RND.pick(["kicker", "kicker", "rail"]);
+    const def = pickModule(() => Phaser.Math.RND.frac(), this.difficulty);
     const worldX = this.nextSpawnX;
-    let obj;
+    const seg = def.segments[0];
 
-    if (type === "kicker") {
-      obj = this.add.image(0, C.WATER_Y, "kicker").setOrigin(0, 1).setDepth(5);
-      obj.featureType = "kicker";
-      obj.worldX = worldX;
-      obj.width0 = obj.width; // ride-up face spans the full width to the lip
-    } else {
-      obj = this.add.image(0, 0, "rail").setOrigin(0, 0).setDepth(5);
-      obj.featureType = "rail";
-      obj.worldX = worldX;
-      obj.width0 = obj.width;
-      obj.railTopY = C.WATER_Y - 64; // grind surface height
-      obj.y = obj.railTopY - 8;
+    const obj = this.add
+      .image(0, 0, def.texture)
+      .setOrigin(def.origin.x, def.origin.y)
+      .setDepth(def.depth);
+    obj.featureType = def.type;
+    obj.worldX = worldX;
+    obj.width0 = moduleFootprint(def);
+
+    if (seg.kind === "ride-up") {
+      obj.y = C.WATER_Y; // origin (0,1) rests the ramp base on the water
+    } else if (seg.kind === "grind") {
+      obj.railTopY = C.WATER_Y - seg.surfaceDrop; // grind surface height
+      obj.y = obj.railTopY - seg.imageYOffset;
     }
 
     this.features.add(obj);

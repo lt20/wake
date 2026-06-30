@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { COLORS, VIRTUAL_WIDTH } from "../config.js";
+import { getModule } from "../modules.js";
 
 // Generates every visual procedurally so the game runs with zero asset files.
 // Each texture is hand-drawn with Graphics then baked. Swap for real art later.
@@ -151,9 +152,10 @@ export default class BootScene extends Phaser.Scene {
     // A clean triangular kicker floating on the water: flat ride-up face
     // (the hypotenuse) rising from the water on the left to the lip on the
     // top-right. The rider glides up this face and launches off the lip.
-    const w = 240; // keep in sync with config.KICKER_WIDTH
-    const rise = 122; // keep in sync with config.KICKER_RISE
-    const h = rise + 12;
+    const seg = getModule("kicker").segments[0]; // dimensions from the catalogue
+    const w = seg.width;
+    const rise = seg.rise;
+    const h = seg.height;
     const g = this.g();
 
     // ramp body (triangle A=bottom-left, B=top-right lip, C=bottom-right)
@@ -196,8 +198,9 @@ export default class BootScene extends Phaser.Scene {
 
   // A slider/box that floats on the water — grindable.
   makeRail() {
-    const w = 260;
-    const h = 70;
+    const seg = getModule("rail").segments[0]; // dimensions from the catalogue
+    const w = seg.width;
+    const h = seg.height;
     const g = this.g();
     // legs / floats
     g.fillStyle(COLORS.railLeg, 1);
