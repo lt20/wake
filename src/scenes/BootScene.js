@@ -10,6 +10,7 @@ export default class BootScene extends Phaser.Scene {
 
   create() {
     this.makeBody();
+    this.makeBodyViews();
     this.makeBoard();
     this.makeKicker();
     this.makeRail();
@@ -81,6 +82,79 @@ export default class BootScene extends Phaser.Scene {
     // origin at the hip; shoulder offset (from hip) is where the arms attach
     this.registry.set("bodyOrigin", { x: hip[0] / W, y: hip[1] / H });
     this.registry.set("bodyShoulder", { x: shoulder[0] - hip[0], y: shoulder[1] - hip[1] });
+  }
+
+  // FRONT- and BACK-facing torso+head, same canvas/geometry/origin as makeBody so
+  // the body sprite can swap between "body" / "bodyFront" / "bodyBack" mid-spin.
+  // Front = chest + face visible; back = plain vest + back of the head (hair).
+  makeBodyViews() {
+    const W = 96;
+    const H = 130;
+    const skin = 0xe7b48c;
+    const hair = 0x2c2118;
+    const vest = 0x223a4c;
+    const vestDk = 0x162a38;
+    const vestAccent = COLORS.rider;
+    const hip = [48, 122];
+    const shoulder = [48, 50];
+    const head = [48, 26];
+
+    // wider, symmetric vest trapezoid shared by both facing views
+    const torso = (g) => {
+      g.fillStyle(vest, 1);
+      g.beginPath();
+      g.moveTo(shoulder[0] - 20, shoulder[1] - 4);
+      g.lineTo(shoulder[0] + 20, shoulder[1] - 4);
+      g.lineTo(hip[0] + 15, hip[1]);
+      g.lineTo(hip[0] - 15, hip[1]);
+      g.closePath();
+      g.fillPath();
+      // shoulder straps
+      g.fillStyle(vestDk, 1);
+      g.fillRoundedRect(shoulder[0] - 20, shoulder[1] - 4, 9, 11, 3);
+      g.fillRoundedRect(shoulder[0] + 11, shoulder[1] - 4, 9, 11, 3);
+    };
+    const neck = (g) => {
+      g.lineStyle(13, skin, 1);
+      g.beginPath();
+      g.moveTo(shoulder[0], shoulder[1] - 2);
+      g.lineTo(head[0], head[1] + 10);
+      g.strokePath();
+    };
+
+    // FRONT
+    const f = this.g();
+    torso(f);
+    // zip panel + highlight down the chest
+    f.fillStyle(vestAccent, 1);
+    f.fillRoundedRect(shoulder[0] - 7, shoulder[1], 14, 62, 5);
+    f.fillStyle(0xffffff, 0.14);
+    f.fillRoundedRect(shoulder[0] - 3, shoulder[1] + 4, 3, 52, 2);
+    neck(f);
+    // head: hair crown up, face below
+    f.fillStyle(hair, 1);
+    f.fillCircle(head[0], head[1] - 2, 15);
+    f.fillStyle(skin, 1);
+    f.fillCircle(head[0], head[1] + 2, 13);
+    f.generateTexture("bodyFront", W, H);
+    f.destroy();
+
+    // BACK
+    const b = this.g();
+    torso(b);
+    // spine seam + yoke line on a plain back
+    b.fillStyle(vestDk, 1);
+    b.fillRoundedRect(shoulder[0] - 4, shoulder[1], 8, 62, 3);
+    b.fillStyle(0x2d4a5e, 1);
+    b.fillRect(shoulder[0] - 18, shoulder[1] + 16, 36, 4);
+    neck(b);
+    // head: all hair (back of the skull), tiny nape of skin at the base
+    b.fillStyle(skin, 1);
+    b.fillCircle(head[0], head[1] + 11, 7);
+    b.fillStyle(hair, 1);
+    b.fillCircle(head[0], head[1], 15);
+    b.generateTexture("bodyBack", W, H);
+    b.destroy();
   }
 
   // A proper wakeboard: long, thin, with upturned tips (spatulas) at BOTH ends
