@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import * as C from "../config.js";
 import {
   landingError,
+  isCleanLanding,
   wipesOutOnWaterLanding,
   countRotations,
   scoreLanding,
@@ -563,6 +564,18 @@ export default class GameScene extends Phaser.Scene {
           // the held direction picks the grab (keyboard arrows, else pointer drag)
           const d = this.readGrabDir();
           if (d.x !== 0 || d.y !== 0) this.grabDir = d;
+        }
+
+        // feed the HUD rotation indicator (how close to an upright landing)
+        {
+          const { flipErr, spinErr } = landingError(this.flipDeg, this.spinDeg);
+          const ok = isCleanLanding(
+            flipErr,
+            spinErr,
+            C.LAND_FLIP_TOLERANCE,
+            C.LAND_SPIN_TOLERANCE
+          );
+          this.game.events.emit("rotation", { flipErr, spinErr, ok });
         }
 
         this.checkAirLanding();

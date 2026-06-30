@@ -53,6 +53,12 @@ export default class HudScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setAlpha(0);
 
+    // Rotation indicator (air only) — a small dial showing how close the board
+    // is to an upright landing. Green within tolerance, red otherwise.
+    this.rotCenter = { x: W / 2, y: 250 };
+    this.rotR = 34;
+    this.rotGfx = this.add.graphics().setVisible(false);
+
     // Big center message -----------------------------------------------------
     this.msgText = this.add
       .text(W / 2, C.VIRTUAL_HEIGHT / 2 - 60, "", {
@@ -114,8 +120,8 @@ export default class HudScene extends Phaser.Scene {
 
     // The HUD is launched/stopped once per run; clear any listeners left over
     // from a previous run so handlers don't accumulate on the global emitter.
-    ["score", "state", "combo", "trick", "speed", "message", "time"].forEach((e) =>
-      ev.off(e)
+    ["score", "state", "combo", "trick", "speed", "message", "time", "rotation"].forEach(
+      (e) => ev.off(e)
     );
 
     ev.on("score", (s) => {
@@ -134,7 +140,10 @@ export default class HudScene extends Phaser.Scene {
         alpha: inAir ? 1 : 0,
         duration: 150,
       });
+      if (!inAir) this.rotGfx.setVisible(false); // dial only shows in the air
     });
+
+    ev.on("rotation", (r) => this.drawRotation(r));
 
     ev.on("combo", (mult) => {
       if (mult > 1) {
@@ -199,5 +208,41 @@ export default class HudScene extends Phaser.Scene {
     const m = Math.floor(s / 60);
     const r = s % 60;
     return `${m}:${r.toString().padStart(2, "0")}`;
+  }
+
+  // Draw the air-only rotation dial: a needle deflecting from straight-up as the
+  // landing error grows, coloured green within tolerance and red outside it.
+  drawRotation(r) {
+    const g = this.rotGfx;
+    const { x, y } = this.rotCenter;
+    const R = this.rotR;
+    const color = r.ok ? 0x33d6c8 : 0xff4d6d;
+    // normalize the worst-axis error (flip max 180°, spin max 90°) to 0..1
+    const norm = Math.min(1, Math.max(r.flipErr / 180, r.spinErr / 90));
+    const ang = -Math.PI / 2 + norm * Math.PI; // straight up at 0, → right at 1
+
+    g.setVisible(true);
+    g.clear();
+    // backdrop + fill tinted by ok/not
+    g.fillStyle(0x06222b, 0.55);
+    g.fillCircle(x, y, R);
+    g.fillStyle(color, r.ok ? 0.22 : 0.14);
+    g.fillCircle(x, y, R - 3);
+    g.lineStyle(3, 0x06222b, 0.9);
+    g.strokeCircle(x, y, R);
+    // upright target tick at the top
+    g.lineStyle(3, 0xffffff, 0.9);
+    g.beginPath();
+    g.moveTo(x, y - R - 6);
+    g.lineTo(x, y - R + 4);
+    g.strokePath();
+    // needle
+    g.lineStyle(5, color, 1);
+    g.beginPath();
+    g.moveTo(x, y);
+    g.lineTo(x + Math.cos(ang) * (R - 6), y + Math.sin(ang) * (R - 6));
+    g.strokePath();
+    g.fillStyle(color, 1);
+    g.fillCircle(x, y, 4);
   }
 }
