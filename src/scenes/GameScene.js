@@ -1,5 +1,12 @@
 import Phaser from "phaser";
 import * as C from "../config.js";
+import {
+  landingError,
+  isCleanLanding,
+  countRotations,
+  scoreLanding,
+  buildTrickName,
+} from "../physics.js";
 
 const DEG = Phaser.Math.DEG_TO_RAD;
 
@@ -303,13 +310,19 @@ export default class GameScene extends Phaser.Scene {
   land(clean, label) {
     if (clean) {
       // award the rotation itself (flips + spins), then the landing bonus
-      const flips = Math.round(Math.abs(this.flipDeg) / 360);
-      const spins = Math.round(Math.abs(this.spinDeg) / 180);
-      this.pending += flips * C.PTS_PER_FLIP + spins * C.PTS_PER_SPIN;
-      this.pending += C.PTS_PERFECT_LAND;
-      const gained = Math.round(this.pending * this.multiplier);
+      const { flips, spins } = countRotations(this.flipDeg, this.spinDeg);
+      const gained = scoreLanding({
+        flips,
+        spins,
+        pending: this.pending,
+        multiplier: this.multiplier,
+      });
       this.score += gained;
-      const name = this.buildTrickName();
+      const name = buildTrickName({
+        flipDeg: this.flipDeg,
+        spinDeg: this.spinDeg,
+        extras: this.trickParts,
+      });
       this.multiplier += 1;
       this.comboTimer = C.COMBO_DECAY;
       if (name) this.game.events.emit("trick", name, gained, this.multiplier);
@@ -348,27 +361,6 @@ export default class GameScene extends Phaser.Scene {
     this.grabNamed = false;
     this.pending = 0;
     this.trickParts = [];
-  }
-
-  // ==========================================================================
-  // Trick naming
-  // ==========================================================================
-  buildTrickName() {
-    const parts = [];
-    const flips = Math.round(Math.abs(this.flipDeg) / 360);
-    if (flips > 0) {
-      const dir = this.flipDeg < 0 ? "Backroll" : "Frontroll";
-      parts.push(flips > 1 ? `${dir} x${flips}` : dir);
-    }
-    const spins = Math.round(Math.abs(this.spinDeg) / 180) * 180;
-    if (spins >= 180) {
-      const dir = this.spinDeg > 0 ? "FS" : "BS";
-      parts.push(`${dir} ${spins}`);
-    }
-    // accumulated extras (grabs, perfect pop, grinds)
-    for (const t of this.trickParts) parts.push(t);
-    if (parts.length === 0) return null;
-    return parts.join(" + ");
   }
 
   // ==========================================================================
@@ -527,16 +519,19 @@ export default class GameScene extends Phaser.Scene {
   }
 
   evaluateWaterLanding() {
-    const flipErr = Math.abs(((this.flipDeg % 360) + 540) % 360 - 180);
-    const spinErr = Math.abs(((this.spinDeg % 180) + 270) % 180 - 90);
-    const flipOk = flipErr <= C.LAND_FLIP_TOLERANCE;
-    const spinOk = spinErr <= C.LAND_SPIN_TOLERANCE;
+    const { flipErr, spinErr } = landingError(this.flipDeg, this.spinDeg);
+    const clean = isCleanLanding(
+      flipErr,
+      spinErr,
+      C.LAND_FLIP_TOLERANCE,
+      C.LAND_SPIN_TOLERANCE
+    );
 
     if (this.grabbing) {
       this.wipeout(); // never land while still holding a grab
       return;
     }
-    if (flipOk && spinOk) {
+    if (clean) {
       const perfect = flipErr < 14 && spinErr < 16;
       this.land(true, perfect ? "PERFECT!" : "NICE!");
     } else {
