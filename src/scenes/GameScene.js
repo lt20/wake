@@ -598,12 +598,12 @@ export default class GameScene extends Phaser.Scene {
     return Phaser.Math.Linear(62, 28, crouch);
   }
 
-  // Procedural SIDE-view legs. The leg POSE never mirrors with the stance — the
-  // rider always leans back against the pull with knees toward +x — so switch is
-  // the same pose with only the BOARD (and its boots) mirrored underneath.
-  // `fore` (0..1) foreshortens the stance along the board axis (1 side-on → ~0
-  // nose-on) without flipping its sign.
-  drawLegs(hipX, hipY, ankleY, crouch, fore) {
+  // Procedural SIDE-view legs. The knee bend stays toward the pull (+x) in both
+  // stances — the rider always leans back the same way. But the FEET mirror with
+  // `dir` so the leading foot (and its accent boot + lighter leg) visibly swaps
+  // sides on a switch landing, matching the mirrored board underneath.
+  // `fore` (0..1) foreshortens the stance toward nose-on through a spin.
+  drawLegs(hipX, hipY, ankleY, crouch, fore, dir) {
     const g = this.legsGfx;
     g.clear();
     const shorts = 0xf2622c;
@@ -631,8 +631,9 @@ export default class GameScene extends Phaser.Scene {
       g.fillCircle(fx, ankleY, (w - 4) / 2 - 1); // ankle — softens the boot join
     };
 
-    leg(this.boardGeom.backFootX * fore, shortsDk, skinDk, 18); // back leg
-    leg(this.boardGeom.frontFootX * fore, shorts, skin, 20); // front leg
+    // back leg drawn first (behind), front (lighter) leg on top; both mirror
+    leg(this.boardGeom.backFootX * fore * dir, shortsDk, skinDk, 18);
+    leg(this.boardGeom.frontFootX * fore * dir, shorts, skin, 20);
     g.fillStyle(shorts, 1);
     const sw = 13 * Math.max(0.4, fore);
     g.fillRoundedRect(hipX - sw, hipY - 8, sw * 2, 16, 7); // hips/seat
@@ -856,7 +857,7 @@ export default class GameScene extends Phaser.Scene {
     // legs + arms per view; keep the local hand point for the tow rope
     let handLX, handLY;
     if (view === "side") {
-      this.drawLegs(hipX, hipY, ankleY, crouch, fore);
+      this.drawLegs(hipX, hipY, ankleY, crouch, fore, dir);
       // hands always reach toward the pull (world +x): switch riders hold the
       // handle behind them and look back over the shoulder, so the rope never
       // crosses the body. Magnitude foreshortens as the rider turns.
