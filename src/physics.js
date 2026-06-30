@@ -32,6 +32,26 @@ export function surfaceSpinPoints(spinDeg) {
   return Math.floor(Math.abs(spinDeg) / 180) * C.PTS_SURFACE_SPIN_PER_180;
 }
 
+// Map the direction held during the air to a grab name. dirX > 0 is toward the
+// nose (forward), dirY < 0 is up. A neutral / ambiguous hold defaults to Indy.
+//   neutral / down  → Indy
+//   forward / back  → Nose / Tail
+//   pure up         → Method
+//   up + back/fwd   → Stalefish / Mute
+export function grabName(dirX, dirY) {
+  const ax = Math.abs(dirX);
+  const ay = Math.abs(dirY);
+  if (ax === 0 && ay === 0) return "Indy";
+  if (ay > ax) {
+    if (dirY < 0) {
+      if (ax === 0) return "Method";
+      return dirX < 0 ? "Stalefish" : "Mute";
+    }
+    return "Indy"; // down hold = standard Indy
+  }
+  return dirX > 0 ? "Nose" : "Tail";
+}
+
 // Number of completed rotations: a flip = 360, a spin = 180.
 export function countRotations(flipDeg, spinDeg) {
   return {

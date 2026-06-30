@@ -8,6 +8,7 @@ import {
   countRotations,
   scoreLanding,
   buildTrickName,
+  grabName,
 } from "./physics.js";
 
 describe("landingError", () => {
@@ -76,6 +77,27 @@ describe("surfaceSpinPoints", () => {
   // does, and that is the sole caller of wipesOutOnWaterLanding.
   it("scores a surface spin without any wipeout decision", () => {
     expect(surfaceSpinPoints(360)).toBeGreaterThan(0);
+  });
+});
+
+describe("grabName", () => {
+  it("defaults to Indy when the hold is neutral", () => {
+    expect(grabName(0, 0)).toBe("Indy");
+  });
+
+  it("maps a down hold to Indy", () => {
+    expect(grabName(0, 8)).toBe("Indy");
+  });
+
+  it("maps forward/back holds to Nose/Tail", () => {
+    expect(grabName(10, 0)).toBe("Nose");
+    expect(grabName(-10, 0)).toBe("Tail");
+  });
+
+  it("maps up holds to Method / Stalefish / Mute", () => {
+    expect(grabName(0, -10)).toBe("Method");
+    expect(grabName(-6, -10)).toBe("Stalefish");
+    expect(grabName(6, -10)).toBe("Mute");
   });
 });
 

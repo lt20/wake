@@ -7,6 +7,7 @@ import {
   scoreLanding,
   buildTrickName,
   surfaceSpinPoints,
+  grabName,
 } from "../physics.js";
 import { pickModule, moduleFootprint } from "../modules.js";
 import { difficultyForElapsed } from "../difficulty.js";
@@ -46,7 +47,8 @@ export default class GameScene extends Phaser.Scene {
     this.surfaceSpin180s = 0; // completed 180s already banked this surface session
     this.grabbing = false;
     this.grabTime = 0;
-    this.grabNamed = false;
+    this.didGrab = false; // a grab was held this airtime
+    this.grabDir = { x: 0, y: 0 }; // last held grab direction
     this.rampT = 0; // 0 on flat water, →1 climbing a kicker to the lip
     this.rampAngle = 0;
     this.prevState = RIDE;
@@ -346,6 +348,20 @@ export default class GameScene extends Phaser.Scene {
     }
   }
 
+  // The grab direction held in the air: keyboard arrows take priority, otherwise
+  // the current pointer's drag offset from where the hold began.
+  readGrabDir() {
+    const k = this.keys;
+    let x = (k.right.isDown ? 1 : 0) - (k.left.isDown ? 1 : 0);
+    let y = (k.down.isDown ? 1 : 0) - (k.up.isDown ? 1 : 0);
+    if (x === 0 && y === 0 && this.gesture.active && !this.gesture.flicked) {
+      const p = this.input.activePointer;
+      x = p.x - this.gesture.sx;
+      y = p.y - this.gesture.sy;
+    }
+    return { x, y };
+  }
+
   // ==========================================================================
   // State transitions
   // ==========================================================================
@@ -382,6 +398,9 @@ export default class GameScene extends Phaser.Scene {
         multiplier: this.multiplier,
       });
       this.score += gained;
+      if (this.didGrab) {
+        this.trickParts.push(`${grabName(this.grabDir.x, this.grabDir.y)} Grab`);
+      }
       const name = buildTrickName({
         flipDeg: this.flipDeg,
         spinDeg: this.spinDeg,
@@ -424,7 +443,8 @@ export default class GameScene extends Phaser.Scene {
     this.spinVel = 0;
     this.grabbing = false;
     this.grabTime = 0;
-    this.grabNamed = false;
+    this.didGrab = false; // a grab was held this airtime
+    this.grabDir = { x: 0, y: 0 }; // last held grab direction
     this.pending = 0;
     this.trickParts = [];
     this.resetSurfaceSpin();
@@ -539,10 +559,10 @@ export default class GameScene extends Phaser.Scene {
         if (holding) {
           this.grabTime += dt;
           this.pending += C.PTS_GRAB_PER_SEC * dt;
-          if (!this.grabNamed) {
-            this.trickParts.push("Indy Grab");
-            this.grabNamed = true;
-          }
+          this.didGrab = true;
+          // the held direction picks the grab (keyboard arrows, else pointer drag)
+          const d = this.readGrabDir();
+          if (d.x !== 0 || d.y !== 0) this.grabDir = d;
         }
 
         this.checkAirLanding();
