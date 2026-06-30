@@ -89,6 +89,12 @@ describe("pickModule", () => {
     expect(pickModule(() => 0.999)).toBe(MODULES[MODULES.length - 1]);
   });
 
+  it("honours a difficulty moduleWeights override", () => {
+    const weights = {};
+    for (const m of MODULES) weights[m.type] = m.type === "rail" ? 1 : 0;
+    expect(pickModule(() => 0.5, { moduleWeights: weights }).type).toBe("rail");
+  });
+
   it("respects relative weights (heavy types beat weight-1 composites)", () => {
     const N = 5000;
     const counts = {};

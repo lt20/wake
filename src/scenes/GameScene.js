@@ -9,6 +9,7 @@ import {
   surfaceSpinPoints,
 } from "../physics.js";
 import { pickModule, moduleFootprint } from "../modules.js";
+import { difficultyForElapsed } from "../difficulty.js";
 
 const DEG = Phaser.Math.DEG_TO_RAD;
 
@@ -56,6 +57,9 @@ export default class GameScene extends Phaser.Scene {
     this.pending = 0; // points earned in the current airtime, awarded on clean land
     this.trickParts = []; // names accumulated this airtime
     this.lastPopTap = -10;
+
+    // Difficulty (drives speed target, spawn gaps, module mix) ---------------
+    this.difficulty = difficultyForElapsed(0);
 
     // Features ---------------------------------------------------------------
     this.features = this.add.group();
@@ -187,7 +191,8 @@ export default class GameScene extends Phaser.Scene {
     }
 
     const footprint = moduleFootprint(def);
-    this.nextSpawnX = baseX + footprint + Phaser.Math.Between(C.SPAWN_GAP_MIN, C.SPAWN_GAP_MAX);
+    const d = this.difficulty;
+    this.nextSpawnX = baseX + footprint + Phaser.Math.Between(d.gapMin, d.gapMax);
     return def;
   }
 
@@ -455,12 +460,16 @@ export default class GameScene extends Phaser.Scene {
     }
     this.emitTime();
 
+    // difficulty ramps with elapsed run time
+    this.difficulty = difficultyForElapsed(C.RUN_DURATION - this.timeLeft);
+
     // scroll the world
     this.scrollX += this.speed * dt;
 
-    // recover speed toward base after a bail
-    if (this.state !== WIPEOUT && this.speed < C.BASE_SPEED) {
-      this.speed = Math.min(C.BASE_SPEED, this.speed + C.SPEED_RECOVER * dt);
+    // climb toward (and recover after a bail relative to) the current speed target
+    const speedTarget = this.difficulty.speedTarget;
+    if (this.state !== WIPEOUT && this.speed < speedTarget) {
+      this.speed = Math.min(speedTarget, this.speed + C.SPEED_RECOVER * dt);
       this.emitSpeed();
     }
 

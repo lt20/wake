@@ -178,13 +178,16 @@ export function nextSegment(def, t) {
 }
 
 // Weighted pick from the catalogue. `rng` is a function returning [0, 1).
-// `difficulty` is accepted for forward-compat (T7 will steer the mix) but the
-// base weights are used until then.
+// When `difficulty.moduleWeights` (a type→weight map) is supplied it steers the
+// mix; otherwise each module's base `weight` is used.
 export function pickModule(rng, difficulty) {
-  const total = MODULES.reduce((s, m) => s + m.weight, 0);
+  const weights = difficulty && difficulty.moduleWeights;
+  const weightOf = (m) => (weights && m.type in weights ? weights[m.type] : m.weight);
+
+  const total = MODULES.reduce((s, m) => s + weightOf(m), 0);
   let r = rng() * total;
   for (const m of MODULES) {
-    r -= m.weight;
+    r -= weightOf(m);
     if (r < 0) return m;
   }
   return MODULES[MODULES.length - 1];
