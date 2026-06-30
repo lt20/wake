@@ -134,7 +134,7 @@ export default class GameScene extends Phaser.Scene {
       .container(C.RIDER_SCREEN_X, C.WATER_Y, [this.board, this.legsGfx, this.body, this.armsGfx])
       .setDepth(11);
 
-    this.crouch = 0.35; // 0 = legs extended, 1 = deeply bent
+    this.crouch = 0.42; // 0 = legs extended, 1 = deeply bent
     this.lean = 0; // upper-body lean against the cable pull (radians)
     this.tuckLift = 0; // how far the board is pulled up toward the body (grab)
 
@@ -598,7 +598,7 @@ export default class GameScene extends Phaser.Scene {
     const shortsDk = 0xc94e1f;
     const skin = 0xe7b48c;
     const skinDk = 0xcf9a72;
-    const kneeFwd = 6 + crouch * 30;
+    const kneeFwd = 8 + crouch * 34;
 
     const leg = (fx, thighC, shinC, w) => {
       const kx = (fx + hipX) / 2 + kneeFwd;
@@ -615,6 +615,8 @@ export default class GameScene extends Phaser.Scene {
       g.strokePath();
       g.fillStyle(thighC, 1);
       g.fillCircle(kx, ky, w / 2 - 1); // knee
+      g.fillStyle(shinC, 1);
+      g.fillCircle(fx, ankleY, (w - 4) / 2 - 1); // ankle — softens the boot join
     };
 
     leg(this.boardGeom.backFootX, shortsDk, skinDk, 18); // back leg (behind)
@@ -633,17 +635,23 @@ export default class GameScene extends Phaser.Scene {
     const skinDk = 0xcf9a72;
 
     const armTo = (ox, tx, ty, color, w) => {
-      const ex = (sx + tx) / 2 + 4;
-      const ey = (sy + ty) / 2 + 10; // elbow dips
+      const ex = (sx + tx) / 2 + 6; // elbow leads forward
+      const ey = (sy + ty) / 2 + 6; // only a slight dip → arm reads long/extended
+      // upper arm (shoulder → elbow)
       g.lineStyle(w, color, 1);
       g.beginPath();
       g.moveTo(sx + ox, sy + 2);
       g.lineTo(ex + ox, ey);
+      g.strokePath();
+      // forearm (elbow → hand), slightly thinner for taper
+      g.lineStyle(w - 2, color, 1);
+      g.beginPath();
+      g.moveTo(ex + ox, ey);
       g.lineTo(tx, ty);
       g.strokePath();
       g.fillStyle(color, 1);
-      g.fillCircle(ex + ox, ey, w / 2 - 1);
-      g.fillCircle(tx, ty, w / 2 - 2); // hand
+      g.fillCircle(ex + ox, ey, w / 2 - 1); // elbow
+      g.fillCircle(tx, ty, w / 2 - 1); // hand / fist on the handle
     };
 
     if (grabPt) {
@@ -676,7 +684,7 @@ export default class GameScene extends Phaser.Scene {
     if (this.state === RIDE && this.rampT === 0) riderY += Math.sin(this.time.now / 120) * 2;
 
     // ease the crouch toward a per-state target (event snaps override briefly)
-    let target = 0.35;
+    let target = 0.42;
     if (this.state === AIR) target = this.grabbing ? 0.6 : 0.5;
     else if (this.state === GRIND) target = 0.45;
     else if (this.state === WIPEOUT) target = 0.7;
@@ -689,8 +697,8 @@ export default class GameScene extends Phaser.Scene {
 
     // upper body leans back against the cable pull (stronger the faster you go)
     let leanTarget = 0;
-    if (this.state === RIDE) leanTarget = -0.2 * (0.55 + 0.45 * speedRatio);
-    else if (this.state === GRIND) leanTarget = -0.12;
+    if (this.state === RIDE) leanTarget = -0.28 * (0.6 + 0.4 * speedRatio);
+    else if (this.state === GRIND) leanTarget = -0.16;
     else if (this.state === WIPEOUT) leanTarget = 0.35;
     this.lean = Phaser.Math.Linear(this.lean, leanTarget, 0.12);
 
@@ -704,7 +712,7 @@ export default class GameScene extends Phaser.Scene {
     this.tuckLift = Phaser.Math.Linear(this.tuckLift, liftTarget, 0.25);
 
     // hips ride up/down with the crouch; the board+feet rise on a grab
-    const hipX = -4;
+    const hipX = -9; // hips sit back behind the feet — weight on the heels
     const baseAnkle = this.boardGeom.bootTopY + 4;
     const hipY = baseAnkle - this.legLen(crouch); // body stays put
     const ankleY = baseAnkle - this.tuckLift; // feet + board lift on a grab
@@ -717,8 +725,8 @@ export default class GameScene extends Phaser.Scene {
     // shoulder position after the lean, then the hand reaching for the handle
     const shoulderX = hipX + this.bodyShoulder.x * Math.cos(this.lean) - this.bodyShoulder.y * Math.sin(this.lean);
     const shoulderY = hipY + this.bodyShoulder.x * Math.sin(this.lean) + this.bodyShoulder.y * Math.cos(this.lean);
-    const handX = shoulderX + 30; // reach forward toward the pull
-    const handY = shoulderY - 2;
+    const handX = shoulderX + 42; // long reach forward toward the pull
+    const handY = shoulderY + 26; // handle held low, near the hip
     const grabPt = this.state === AIR && this.grabbing ? { x: hipX + 6, y: ankleY + 2 } : null;
     this.drawArms(shoulderX, shoulderY, handX, handY, grabPt);
 
