@@ -20,7 +20,7 @@
 - [x] **T3** — Meilleur score persistant (`localStorage`, `src/storage.js`) — _dép : T2_ — `959b91a` storage.js + badge record, 8 tests.
 - [x] **T4** — Rotations glissées au sol (eau/kicker/slide) sans wipeout — _dép : T1_ — `a757ba1` surface spins RIDE/GRIND, wipeout AIR→eau seul, +6 tests.
 - [x] **T5** — Système de modules data-driven (`src/modules.js`, refactor sans régression) — _dép : T1_ — `3e8c8c5` catalogue + pickModule/footprint, kicker/rail inchangés, 6 tests.
-- [ ] **T6** — Catalogue ≥ 10 obstacles dont composites (slide→kicker, kicker→slide…) — _dép : T5, T4_
+- [x] **T6** — Catalogue ≥ 10 obstacles dont composites (slide→kicker, kicker→slide…) — _dép : T5, T4_ — `a1e2871` 11 types, composites segmentés, textures procédurales, nextSegment, 12 tests modules.
 - [ ] **T7** — Courbe de difficulté progressive (`src/difficulty.js`) — _dép : T1, T5_
 - [ ] **T8** — Son synthétisé Web Audio (`src/audio.js`) + mute — _dép : T2_
 - [ ] **T9** — Grabs directionnels (Indy/Method/Stalefish/Nose/Tail) — _dép : T1_
@@ -36,3 +36,4 @@
 - T3 ✅ 959b91a — storage.js (localStorage, fallback gracieux), badge « NOUVEAU RECORD ! », meilleur affiché Menu+GameOver, 8 tests.
 - T4 ✅ a757ba1 — surface spins (eau/kicker/slide) en RIDE/GRIND, flips ignorés hors air, points/feed « Surface N », continuité au pop, wipeout AIR→eau uniquement. 29 tests au total.
 - T5 ✅ 3e8c8c5 — modules.js data-driven (segments ride-up/grind), pickModule/moduleFootprint, spawnFeature + BootScene consomment le catalogue, kicker/rail sans régression. 35 tests au total.
+- T6 ✅ a1e2871 — 11 types d'obstacles (dont slide→kicker, kicker→slide, A-frame, double kicker, down-slide, kink, gros slide, flat box), spawn par segment réutilisant la physique kicker/rail, textures procédurales depuis le catalogue, nextSegment. 41 tests au total.
