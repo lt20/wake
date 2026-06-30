@@ -2,10 +2,11 @@ import Phaser from "phaser";
 import * as C from "../config.js";
 import {
   landingError,
-  isCleanLanding,
+  wipesOutOnWaterLanding,
   countRotations,
   scoreLanding,
   buildTrickName,
+  surfaceSpinPoints,
 } from "../physics.js";
 
 const DEG = Phaser.Math.DEG_TO_RAD;
@@ -38,6 +39,8 @@ export default class GameScene extends Phaser.Scene {
     this.flipVel = 0;
     this.spinDeg = 0;
     this.spinVel = 0;
+    this.surfaceSpinDeg = 0; // monotonic grounded-spin total awaiting points
+    this.surfaceSpin180s = 0; // completed 180s already banked this surface session
     this.grabbing = false;
     this.grabTime = 0;
     this.grabNamed = false;
@@ -272,18 +275,33 @@ export default class GameScene extends Phaser.Scene {
   }
 
   doFlick(dx, dy) {
-    if (this.state !== AIR) return;
-    if (Math.abs(dx) > Math.abs(dy)) {
-      // horizontal → spin (right = frontside +, left = backside -)
+    const horizontal = Math.abs(dx) > Math.abs(dy);
+
+    if (this.state === AIR) {
+      if (horizontal) {
+        // horizontal → spin (right = frontside +, left = backside -)
+        this.spinVel = Phaser.Math.Clamp(
+          this.spinVel + Math.sign(dx) * C.SPIN_IMPULSE,
+          -C.ROT_MAX,
+          C.ROT_MAX
+        );
+      } else {
+        // vertical → flip (up = backroll -, down = frontroll +)
+        this.flipVel = Phaser.Math.Clamp(
+          this.flipVel + Math.sign(dy) * C.FLIP_IMPULSE,
+          -C.ROT_MAX,
+          C.ROT_MAX
+        );
+      }
+      return;
+    }
+
+    // On the surface (water / kicker / slide): only SPINS are possible. A
+    // vertical flip gesture is ignored — flips are strictly an in-air move.
+    if (this.state === RIDE || this.state === GRIND) {
+      if (!horizontal) return;
       this.spinVel = Phaser.Math.Clamp(
-        this.spinVel + Math.sign(dx) * C.SPIN_IMPULSE,
-        -C.ROT_MAX,
-        C.ROT_MAX
-      );
-    } else {
-      // vertical → flip (up = backroll -, down = frontroll +)
-      this.flipVel = Phaser.Math.Clamp(
-        this.flipVel + Math.sign(dy) * C.FLIP_IMPULSE,
+        this.spinVel + Math.sign(dx) * C.SURFACE_SPIN_IMPULSE,
         -C.ROT_MAX,
         C.ROT_MAX
       );
@@ -298,6 +316,7 @@ export default class GameScene extends Phaser.Scene {
     this.vy = -velocity;
     this.crouch = 0; // legs snap straight to push off
     this.activeRail = null;
+    this.resetSurfaceSpin(); // spin in progress carries over via spinDeg/spinVel
     if (perfect) {
       this.pending += C.PTS_PERFECT_POP;
       this.trickParts.push("Perfect Pop");
@@ -309,6 +328,7 @@ export default class GameScene extends Phaser.Scene {
     this.activeRail = null;
     this.state = AIR;
     this.vy = -velocity;
+    this.resetSurfaceSpin();
   }
 
   land(clean, label) {
@@ -365,6 +385,38 @@ export default class GameScene extends Phaser.Scene {
     this.grabNamed = false;
     this.pending = 0;
     this.trickParts = [];
+    this.resetSurfaceSpin();
+  }
+
+  // End the current grounded-spin session. spinDeg / spinVel are intentionally
+  // NOT cleared here so a spin in progress carries over into the air on a pop.
+  resetSurfaceSpin() {
+    this.surfaceSpinDeg = 0;
+    this.surfaceSpin180s = 0;
+  }
+
+  // Integrate a flat (yaw-only) spin while on the water or a module, banking
+  // points + a trick-feed entry per completed 180. This path never wipes out.
+  tickSurfaceSpin(dt) {
+    if (this.state !== RIDE && this.state !== GRIND) return;
+    if (this.spinVel === 0) return;
+
+    this.spinDeg += this.spinVel * dt;
+    this.surfaceSpinDeg += Math.abs(this.spinVel) * dt;
+    this.spinVel = Phaser.Math.Linear(this.spinVel, 0, C.SURFACE_SPIN_FRICTION * dt);
+    if (Math.abs(this.spinVel) < 2) this.spinVel = 0;
+
+    const done = Math.floor(this.surfaceSpinDeg / 180);
+    if (done > this.surfaceSpin180s) {
+      const gained = surfaceSpinPoints((done - this.surfaceSpin180s) * 180);
+      this.surfaceSpin180s = done;
+      this.score += gained;
+      this.multiplier += 1;
+      this.comboTimer = C.COMBO_DECAY;
+      this.emitScore();
+      this.emitCombo();
+      this.game.events.emit("trick", `Surface ${done * 180}`, gained, this.multiplier);
+    }
   }
 
   // ==========================================================================
@@ -411,6 +463,7 @@ export default class GameScene extends Phaser.Scene {
       case RIDE:
         this.grabbing = false;
         this.rideKickerOrWater();
+        this.tickSurfaceSpin(dt); // flat spins on water + kicker ride-up
         this.spray.emitting = this.rampT === 0; // spray only on the flat water
         // combo decay on the ground
         if (this.multiplier > 1) {
@@ -453,8 +506,8 @@ export default class GameScene extends Phaser.Scene {
         this.spray.emitting = false;
         // accrue grind points + keep the rider level on the rail
         this.pending += C.PTS_GRIND_PER_SEC * dt;
-        this.flipDeg = Phaser.Math.Linear(this.flipDeg, 0, 0.3);
-        this.spinDeg = Phaser.Math.Linear(this.spinDeg, 0, 0.3);
+        this.flipDeg = Phaser.Math.Linear(this.flipDeg, 0, 0.3); // no flips on a rail
+        this.tickSurfaceSpin(dt); // but surface spins ARE allowed while grinding
         this.y = this.activeRail.railTopY;
         // reached the end of the rail?
         const railEndWorld = this.activeRail.worldX + this.activeRail.width0 - 30;
@@ -535,23 +588,21 @@ export default class GameScene extends Phaser.Scene {
 
   evaluateWaterLanding() {
     const { flipErr, spinErr } = landingError(this.flipDeg, this.spinDeg);
-    const clean = isCleanLanding(
-      flipErr,
-      spinErr,
-      C.LAND_FLIP_TOLERANCE,
-      C.LAND_SPIN_TOLERANCE
-    );
-
-    if (this.grabbing) {
-      this.wipeout(); // never land while still holding a grab
+    // The sole wipeout path: still grabbing, or not upright enough on impact.
+    if (
+      wipesOutOnWaterLanding(
+        this.grabbing,
+        flipErr,
+        spinErr,
+        C.LAND_FLIP_TOLERANCE,
+        C.LAND_SPIN_TOLERANCE
+      )
+    ) {
+      this.wipeout();
       return;
     }
-    if (clean) {
-      const perfect = flipErr < 14 && spinErr < 16;
-      this.land(true, perfect ? "PERFECT!" : "NICE!");
-    } else {
-      this.wipeout();
-    }
+    const perfect = flipErr < 14 && spinErr < 16;
+    this.land(true, perfect ? "PERFECT!" : "NICE!");
   }
 
   // ==========================================================================

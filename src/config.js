@@ -32,13 +32,16 @@ export const RIDER_SCALE = 0.82; // base display scale of the rider sprite
 // Trick rotation -------------------------------------------------------------
 export const FLIP_IMPULSE = 430; // deg/s added per vertical flick (roll)
 export const SPIN_IMPULSE = 360; // deg/s added per horizontal flick (yaw)
+export const SURFACE_SPIN_IMPULSE = 300; // deg/s per horizontal flick while grounded
+export const SURFACE_SPIN_FRICTION = 1.6; // per-second decay of grounded yaw velocity
 export const ROT_MAX = 1100; // clamp angular velocity (deg/s)
 export const LAND_FLIP_TOLERANCE = 42; // deg from an upright multiple of 360
 export const LAND_SPIN_TOLERANCE = 48; // deg from a clean multiple of 180
 
 // Scoring --------------------------------------------------------------------
 export const PTS_PER_FLIP = 500; // per completed roll (360 of flip)
-export const PTS_PER_SPIN = 300; // per 180 of spin
+export const PTS_PER_SPIN = 300; // per 180 of spin (in the air)
+export const PTS_SURFACE_SPIN_PER_180 = 150; // per 180 of spin on the surface (ground/module)
 export const PTS_GRAB_PER_SEC = 900; // grab points accrue while held
 export const PTS_GRIND_PER_SEC = 700; // grind points accrue while sliding
 export const PTS_PERFECT_POP = 250;

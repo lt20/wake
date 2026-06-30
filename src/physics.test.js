@@ -3,6 +3,8 @@ import * as C from "./config.js";
 import {
   landingError,
   isCleanLanding,
+  wipesOutOnWaterLanding,
+  surfaceSpinPoints,
   countRotations,
   scoreLanding,
   buildTrickName,
@@ -40,6 +42,40 @@ describe("isCleanLanding", () => {
 
   it("is false when spin exceeds tolerance", () => {
     expect(isCleanLanding(10, 90, 42, 48)).toBe(false);
+  });
+});
+
+describe("wipesOutOnWaterLanding", () => {
+  it("always wipes out when still grabbing, even if perfectly upright", () => {
+    expect(wipesOutOnWaterLanding(true, 0, 0, 42, 48)).toBe(true);
+  });
+
+  it("wipes out when rotation is out of tolerance", () => {
+    expect(wipesOutOnWaterLanding(false, 90, 0, 42, 48)).toBe(true);
+    expect(wipesOutOnWaterLanding(false, 0, 90, 42, 48)).toBe(true);
+  });
+
+  it("does NOT wipe out on a clean, grab-free landing", () => {
+    expect(wipesOutOnWaterLanding(false, 20, 20, 42, 48)).toBe(false);
+  });
+});
+
+describe("surfaceSpinPoints", () => {
+  it("awards nothing below a completed 180", () => {
+    expect(surfaceSpinPoints(0)).toBe(0);
+    expect(surfaceSpinPoints(179)).toBe(0);
+  });
+
+  it("awards one increment per completed 180, sign-agnostic", () => {
+    expect(surfaceSpinPoints(180)).toBe(C.PTS_SURFACE_SPIN_PER_180);
+    expect(surfaceSpinPoints(360)).toBe(2 * C.PTS_SURFACE_SPIN_PER_180);
+    expect(surfaceSpinPoints(-540)).toBe(3 * C.PTS_SURFACE_SPIN_PER_180);
+  });
+
+  // The rule: a grounded spin has no wipeout path — only an air→water landing
+  // does, and that is the sole caller of wipesOutOnWaterLanding.
+  it("scores a surface spin without any wipeout decision", () => {
+    expect(surfaceSpinPoints(360)).toBeGreaterThan(0);
   });
 });
 

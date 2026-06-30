@@ -19,6 +19,19 @@ export function isCleanLanding(flipErr, spinErr, flipTol, spinTol) {
   return flipErr <= flipTol && spinErr <= spinTol;
 }
 
+// The ONLY path to a wipeout: an air→water landing, either while still holding a
+// grab or with the board too far from upright. Surface spins (RIDE/GRIND) never
+// route through here, so spinning on the ground can never wipe out.
+export function wipesOutOnWaterLanding(grabbing, flipErr, spinErr, flipTol, spinTol) {
+  if (grabbing) return true;
+  return !isCleanLanding(flipErr, spinErr, flipTol, spinTol);
+}
+
+// Points banked for a span of surface-spin degrees: one award per completed 180.
+export function surfaceSpinPoints(spinDeg) {
+  return Math.floor(Math.abs(spinDeg) / 180) * C.PTS_SURFACE_SPIN_PER_180;
+}
+
 // Number of completed rotations: a flip = 360, a spin = 180.
 export function countRotations(flipDeg, spinDeg) {
   return {
