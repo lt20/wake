@@ -10,6 +10,8 @@ export default class BootScene extends Phaser.Scene {
 
   create() {
     this.makeBody();
+    this.makeBodyViews();
+    this.makeHead();
     this.makeBoard();
     this.makeKicker();
     this.makeRail();
@@ -26,26 +28,23 @@ export default class BootScene extends Phaser.Scene {
     return this.make.graphics({ x: 0, y: 0, add: false });
   }
 
-  // The wakeboarder's UPPER BODY only (torso + arms + head + handle). Legs are
-  // drawn procedurally each frame so they can flex/extend. Leaned-back stance,
-  // both arms out front gripping the handle. Origin is the HIP (bottom-center),
-  // so the body can be hung off the top of the procedural legs.
+  // The wakeboarder's TORSO only (the life vest), front-profile / regular stance.
+  // The HEAD is a separate sprite (makeHead) so it can stay in profile while the
+  // torso turns front/back; LEGS + ARMS are drawn procedurally each frame. Origin
+  // is the HIP (bottom-center), so the torso hangs off the top of the legs.
   makeBody() {
     const W = 96;
     const H = 130;
     const g = this.g();
 
-    const skin = 0xe7b48c;
-    const hair = 0x2c2118;
     const vest = 0x223a4c;
     const vestAccent = COLORS.rider;
 
     // neutral, near-vertical torso (lean is applied dynamically at runtime).
     const hip = [48, 122];
     const shoulder = [48, 50];
-    const head = [48, 26];
 
-    // torso / life vest
+    // torso / life vest (front-profile: accent zip down the chest)
     g.fillStyle(vest, 1);
     g.beginPath();
     g.moveTo(shoulder[0] - 16, shoulder[1] - 4);
@@ -54,33 +53,121 @@ export default class BootScene extends Phaser.Scene {
     g.lineTo(hip[0] - 13, hip[1]);
     g.closePath();
     g.fillPath();
-    // accent panel down the front
     g.fillStyle(vestAccent, 1);
     g.fillRoundedRect(shoulder[0] - 9, shoulder[1], 18, 52, 6);
     g.fillStyle(0xffffff, 0.16);
     g.fillRoundedRect(shoulder[0] - 4, shoulder[1] + 4, 4, 44, 2);
 
-    // neck
-    g.lineStyle(12, skin, 1);
-    g.beginPath();
-    g.moveTo(shoulder[0], shoulder[1]);
-    g.lineTo(head[0], head[1] + 10);
-    g.strokePath();
-
-    // head + hair
-    g.fillStyle(skin, 1);
-    g.fillCircle(head[0], head[1], 14);
-    g.fillStyle(hair, 1);
-    g.slice(head[0], head[1] - 1, 15, Phaser.Math.DEG_TO_RAD * 168, Phaser.Math.DEG_TO_RAD * 372, false);
-    g.fillPath();
-    g.fillTriangle(head[0] + 7, head[1] - 12, head[0] + 20, head[1] - 18, head[0] + 14, head[1] - 1);
-
     g.generateTexture("body", W, H);
     g.destroy();
 
-    // origin at the hip; shoulder offset (from hip) is where the arms attach
+    // origin at the hip; shoulder offset (from hip) is where the head/arms attach
     this.registry.set("bodyOrigin", { x: hip[0] / W, y: hip[1] / H });
     this.registry.set("bodyShoulder", { x: shoulder[0] - hip[0], y: shoulder[1] - hip[1] });
+  }
+
+  // The head, ALWAYS drawn as a right-facing PROFILE (looks toward the pull). A
+  // standalone sprite layered over the torso so it never mirrors with the stance
+  // and can later spin independently during tricks. Origin = neck base (where it
+  // meets the shoulder).
+  makeHead() {
+    const W = 44;
+    const H = 50;
+    const skin = 0xe7b48c;
+    const hair = 0x2c2118;
+    const cx = 22;
+    const neckBase = 46; // origin y (sits on the shoulder)
+    const hy = 18; // head centre
+    const g = this.g();
+
+    // neck
+    g.lineStyle(12, skin, 1);
+    g.beginPath();
+    g.moveTo(cx, neckBase);
+    g.lineTo(cx, hy + 10);
+    g.strokePath();
+    // head + hair (profile facing right, hair sweeps back)
+    g.fillStyle(skin, 1);
+    g.fillCircle(cx, hy, 14);
+    g.fillStyle(hair, 1);
+    g.slice(cx, hy - 1, 15, Phaser.Math.DEG_TO_RAD * 168, Phaser.Math.DEG_TO_RAD * 372, false);
+    g.fillPath();
+    g.fillTriangle(cx + 7, hy - 12, cx + 20, hy - 18, cx + 14, hy - 1);
+
+    g.generateTexture("head", W, H);
+    g.destroy();
+    this.registry.set("headOrigin", { x: cx / W, y: neckBase / H });
+  }
+
+  // The three other TORSO views (headless, same canvas/origin as makeBody):
+  //  - bodyBackProfile : back of the vest, side-on → the SWITCH resting stance
+  //  - bodyFront       : chest square to the camera → mid-frontside reveal
+  //  - bodyBack        : back square to the camera → mid-backside reveal
+  // The head is layered separately, always in profile, on top of all of them.
+  makeBodyViews() {
+    const W = 96;
+    const H = 130;
+    const vest = 0x223a4c;
+    const vestDk = 0x162a38;
+    const vestAccent = COLORS.rider;
+    const hip = [48, 122];
+    const shoulder = [48, 50];
+
+    // narrow vest trapezoid (matches makeBody's profile width)
+    const profileTorso = (g) => {
+      g.fillStyle(vest, 1);
+      g.beginPath();
+      g.moveTo(shoulder[0] - 16, shoulder[1] - 4);
+      g.lineTo(shoulder[0] + 16, shoulder[1] - 4);
+      g.lineTo(hip[0] + 13, hip[1]);
+      g.lineTo(hip[0] - 13, hip[1]);
+      g.closePath();
+      g.fillPath();
+    };
+    // wider, symmetric vest trapezoid for the square-to-camera views
+    const wideTorso = (g) => {
+      g.fillStyle(vest, 1);
+      g.beginPath();
+      g.moveTo(shoulder[0] - 20, shoulder[1] - 4);
+      g.lineTo(shoulder[0] + 20, shoulder[1] - 4);
+      g.lineTo(hip[0] + 15, hip[1]);
+      g.lineTo(hip[0] - 15, hip[1]);
+      g.closePath();
+      g.fillPath();
+      g.fillStyle(vestDk, 1);
+      g.fillRoundedRect(shoulder[0] - 20, shoulder[1] - 4, 9, 11, 3);
+      g.fillRoundedRect(shoulder[0] + 11, shoulder[1] - 4, 9, 11, 3);
+    };
+
+    // BACK-PROFILE (switch rest): plain back of the vest, side-on, no zip
+    const bp = this.g();
+    profileTorso(bp);
+    bp.fillStyle(vestDk, 1);
+    bp.fillRoundedRect(shoulder[0] - 3, shoulder[1], 6, 56, 3); // spine seam
+    bp.fillStyle(0x2d4a5e, 1);
+    bp.fillRect(shoulder[0] - 13, shoulder[1] + 14, 26, 3); // back yoke
+    bp.generateTexture("bodyBackProfile", W, H);
+    bp.destroy();
+
+    // FRONT (square to camera): chest zip
+    const f = this.g();
+    wideTorso(f);
+    f.fillStyle(vestAccent, 1);
+    f.fillRoundedRect(shoulder[0] - 7, shoulder[1], 14, 62, 5);
+    f.fillStyle(0xffffff, 0.14);
+    f.fillRoundedRect(shoulder[0] - 3, shoulder[1] + 4, 3, 52, 2);
+    f.generateTexture("bodyFront", W, H);
+    f.destroy();
+
+    // BACK (square to camera): plain back with a yoke + spine seam
+    const b = this.g();
+    wideTorso(b);
+    b.fillStyle(vestDk, 1);
+    b.fillRoundedRect(shoulder[0] - 4, shoulder[1], 8, 62, 3);
+    b.fillStyle(0x2d4a5e, 1);
+    b.fillRect(shoulder[0] - 18, shoulder[1] + 16, 36, 4);
+    b.generateTexture("bodyBack", W, H);
+    b.destroy();
   }
 
   // A proper wakeboard: long, thin, with upturned tips (spatulas) at BOTH ends
