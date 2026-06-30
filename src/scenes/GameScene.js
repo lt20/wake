@@ -126,13 +126,16 @@ export default class GameScene extends Phaser.Scene {
     //   - board (boots baked on) at the bottom
     //   - legs + arms: Graphics redrawn every frame (flex/extend, follow handle)
     //   - body: torso+head sprite hung off the hips, rotated for the lean
+    const headOrigin = this.registry.get("headOrigin") || { x: 0.5, y: 0.92 };
     this.legsGfx = this.add.graphics();
     this.armsGfx = this.add.graphics();
     this.board = this.add.image(0, -this.boardGeom.topLocalY, "board");
     this.body = this.add.image(0, 0, "body").setOrigin(bodyOrigin.x, bodyOrigin.y);
+    // head is a separate sprite kept in profile, layered over the torso
+    this.head = this.add.image(0, 0, "head").setOrigin(headOrigin.x, headOrigin.y);
 
     this.riderC = this.add
-      .container(C.RIDER_SCREEN_X, C.WATER_Y, [this.board, this.legsGfx, this.body, this.armsGfx])
+      .container(C.RIDER_SCREEN_X, C.WATER_Y, [this.board, this.legsGfx, this.body, this.head, this.armsGfx])
       .setDepth(11);
 
     this.crouch = 0.42; // 0 = legs extended, 1 = deeply bent
@@ -595,17 +598,19 @@ export default class GameScene extends Phaser.Scene {
     return Phaser.Math.Linear(62, 28, crouch);
   }
 
-  // Procedural SIDE-view legs: feet locked to the board, knees bend forward as
-  // the rider crouches. `squeeze` foreshortens the stance along the board axis
-  // (±1 side-on → ~0 nose-on) and carries the sign that mirrors switch stance.
-  drawLegs(hipX, hipY, ankleY, crouch, squeeze) {
+  // Procedural SIDE-view legs. The leg POSE never mirrors with the stance — the
+  // rider always leans back against the pull with knees toward +x — so switch is
+  // the same pose with only the BOARD (and its boots) mirrored underneath.
+  // `fore` (0..1) foreshortens the stance along the board axis (1 side-on → ~0
+  // nose-on) without flipping its sign.
+  drawLegs(hipX, hipY, ankleY, crouch, fore) {
     const g = this.legsGfx;
     g.clear();
     const shorts = 0xf2622c;
     const shortsDk = 0xc94e1f;
     const skin = 0xe7b48c;
     const skinDk = 0xcf9a72;
-    const kneeFwd = (8 + crouch * 34) * squeeze;
+    const kneeFwd = (8 + crouch * 34) * fore;
 
     const leg = (fx, thighC, shinC, w) => {
       const kx = (fx + hipX) / 2 + kneeFwd;
@@ -626,10 +631,10 @@ export default class GameScene extends Phaser.Scene {
       g.fillCircle(fx, ankleY, (w - 4) / 2 - 1); // ankle — softens the boot join
     };
 
-    leg(this.boardGeom.backFootX * squeeze, shortsDk, skinDk, 18); // back leg
-    leg(this.boardGeom.frontFootX * squeeze, shorts, skin, 20); // front leg
+    leg(this.boardGeom.backFootX * fore, shortsDk, skinDk, 18); // back leg
+    leg(this.boardGeom.frontFootX * fore, shorts, skin, 20); // front leg
     g.fillStyle(shorts, 1);
-    const sw = 13 * Math.max(0.4, Math.abs(squeeze));
+    const sw = 13 * Math.max(0.4, fore);
     g.fillRoundedRect(hipX - sw, hipY - 8, sw * 2, 16, 7); // hips/seat
   }
 
@@ -809,46 +814,55 @@ export default class GameScene extends Phaser.Scene {
     const sw = Math.sin(Y); // + = chest to camera, − = back to camera
     const sideAmt = Math.abs(cw);
     const faceAmt = Math.abs(sw);
-    const dir = cw >= 0 ? 1 : -1; // side profile facing (+1 = regular, −1 = switch)
+    const dir = cw >= 0 ? 1 : -1; // board facing (+1 = regular, −1 = switch)
     const view = sideAmt >= faceAmt ? "side" : sw > 0 ? "front" : "back";
-    const squeeze = dir * Math.max(0.1, sideAmt); // along-board foreshorten (signed)
+    const fore = Math.max(0.1, sideAmt); // along-board foreshorten (unsigned)
+    const squeeze = dir * fore; // signed: mirrors the BOARD only (boots swap)
 
     // a grab pulls the board (and the locked-in feet) UP toward the body
     const liftTarget = this.state === AIR && this.grabbing ? 34 : 0;
     this.tuckLift = Phaser.Math.Linear(this.tuckLift, liftTarget, 0.25);
 
-    // hips ride up/down with the crouch; the board+feet rise on a grab. The
-    // fore/aft hip offset foreshortens (and mirrors) with the stance.
-    const hipX = -9 * squeeze; // hips sit back behind the feet — weight on heels
+    // The upper-body POSE never mirrors: the rider always leans back against the
+    // pull (hips toward −x, weight on the heels). Only the board mirrors, which is
+    // what swaps the leading foot. Fore/aft offset foreshortens toward nose-on.
+    const hipX = -9 * fore;
     const baseAnkle = this.boardGeom.bootTopY + 4;
     const hipY = baseAnkle - this.legLen(crouch); // body stays put
     const ankleY = baseAnkle - this.tuckLift; // feet + board lift on a grab
 
-    // board foreshortens to nose-on through the middle of a spin (and mirrors)
+    // board foreshortens to nose-on mid-spin AND mirrors for switch (boots swap)
     this.board.y = -this.boardGeom.topLocalY - this.tuckLift;
     this.board.scaleX = squeeze;
 
-    // body: swap side / front / back texture and foreshorten to match the yaw
-    const bodyTex = view === "side" ? "body" : view === "front" ? "bodyFront" : "bodyBack";
+    // torso view by yaw quadrant: front-profile (regular) ↔ back-profile (switch)
+    // on the sides; chest/back square-to-camera through the spin reveals. Drawn in
+    // its final orientation, so no mirroring — the head + legs stay un-mirrored.
+    const bodyTex =
+      view === "side" ? (cw >= 0 ? "body" : "bodyBackProfile") : view === "front" ? "bodyFront" : "bodyBack";
     if (this.body.texture.key !== bodyTex) this.body.setTexture(bodyTex);
     this.body.setPosition(hipX, hipY);
     this.body.setRotation(this.lean);
-    this.body.scaleX = view === "side" ? dir * Math.max(0.22, sideAmt) : Math.max(0.34, faceAmt);
+    this.body.scaleX = view === "side" ? Math.max(0.22, sideAmt) : Math.max(0.34, faceAmt);
 
     // shoulder anchor after the lean
     const shoulderX = hipX + this.bodyShoulder.x * Math.cos(this.lean) - this.bodyShoulder.y * Math.sin(this.lean);
     const shoulderY = hipY + this.bodyShoulder.x * Math.sin(this.lean) + this.bodyShoulder.y * Math.cos(this.lean);
 
+    // head: always a right-facing profile, never mirrored, perched on the shoulder
+    this.head.setPosition(shoulderX, shoulderY);
+    this.head.setRotation(this.lean);
+
     // legs + arms per view; keep the local hand point for the tow rope
     let handLX, handLY;
     if (view === "side") {
-      this.drawLegs(hipX, hipY, ankleY, crouch, squeeze);
+      this.drawLegs(hipX, hipY, ankleY, crouch, fore);
       // hands always reach toward the pull (world +x): switch riders hold the
       // handle behind them and look back over the shoulder, so the rope never
       // crosses the body. Magnitude foreshortens as the rider turns.
       handLX = shoulderX + 42 * Math.max(0.12, sideAmt);
       handLY = shoulderY + 26;
-      const grabPt = this.state === AIR && this.grabbing ? { x: hipX + 6 * squeeze, y: ankleY + 2 } : null;
+      const grabPt = this.state === AIR && this.grabbing ? { x: hipX + 6 * fore, y: ankleY + 2 } : null;
       this.drawArms(shoulderX, shoulderY, handLX, handLY, grabPt, 1);
     } else {
       this.drawLegsFacing(hipX, hipY, ankleY, crouch, faceAmt);
@@ -861,10 +875,10 @@ export default class GameScene extends Phaser.Scene {
     this.riderC.setRotation(rot);
     this.riderC.setScale(S, S);
 
-    // tint cues on the body
-    if (this.state === WIPEOUT) this.body.setTint(C.COLORS.bad);
-    else if (this.state === GRIND) this.body.setTint(0xfff1a8);
-    else this.body.clearTint();
+    // tint cues on the body + head
+    if (this.state === WIPEOUT) { this.body.setTint(C.COLORS.bad); this.head.setTint(C.COLORS.bad); }
+    else if (this.state === GRIND) { this.body.setTint(0xfff1a8); this.head.setTint(0xfff1a8); }
+    else { this.body.clearTint(); this.head.clearTint(); }
 
     // spray follows the board on the water
     this.spray.setPosition(x - 36, C.WATER_Y - 4);
