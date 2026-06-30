@@ -15,7 +15,7 @@
 
 ## Tâches
 
-- [ ] **T1** — vitest + extraction physique pure (`src/physics.js` + tests) — _dép : —_ ⟵ **EN PREMIER**
+- [x] **T1** — vitest + extraction physique pure (`src/physics.js` + tests) — _dép : —_ — `e5c4391` physics.js pur extrait de GameScene, 15 tests verts, build OK.
 - [ ] **T2** — Boucle Menu → Game → Game Over + run chronométré (90 s) — _dép : —_
 - [ ] **T3** — Meilleur score persistant (`localStorage`, `src/storage.js`) — _dép : T2_
 - [ ] **T4** — Rotations glissées au sol (eau/kicker/slide) sans wipeout — _dép : T1_
@@ -31,3 +31,4 @@
 - T1 ✅ <hash> — vitest ajouté, physics.js extrait, 9 tests verts.
 - T6 ⛔ BLOCKED <raison>.
 -->
+- T1 ✅ e5c4391 — vitest ajouté, physics.js (5 fns pures) extrait de GameScene, 15 tests verts, build OK.
