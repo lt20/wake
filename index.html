@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="theme-color" content="#0b2a3a" />
+    <title>Cable Rush — Wakeboard</title>
+    <script>
+      // Self-heal: a leftover service worker from a *different* localhost project
+      // (e.g. a vite-plugin-pwa app) can hijack this origin and serve a stale,
+      // blank shell instead of the game. Kill any SW + caches on load so this
+      // page always boots from the real dev server.
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.getRegistrations().then((regs) => {
+          let had = regs.length > 0;
+          regs.forEach((r) => r.unregister());
+          if (window.caches) caches.keys().then((ks) => ks.forEach((k) => caches.delete(k)));
+          if (had) location.reload(); // reload once, now uncontrolled by the old SW
+        });
+      }
+    </script>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+        -webkit-tap-highlight-color: transparent;
+      }
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #061821;
+        touch-action: none;
+        overscroll-behavior: none;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      }
+      #game {
+        width: 100vw;
+        height: 100vh;
+        height: 100dvh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      canvas {
+        display: block;
+        touch-action: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="game"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

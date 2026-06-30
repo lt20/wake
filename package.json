@@ -1,0 +1,17 @@
+{
+  "name": "cable-rush",
+  "version": "0.1.0",
+  "description": "Cable Rush — a 2.5D wakeboard cable park trick game (THPS x OlliOlli vibes)",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --host"
+  },
+  "dependencies": {
+    "phaser": "^3.80.1"
+  },
+  "devDependencies": {
+    "vite": "^5.4.0"
+  }
+}
