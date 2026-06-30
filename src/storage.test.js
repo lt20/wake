@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { loadBest, saveBestIfHigher } from "./storage.js";
+import { loadBest, saveBestIfHigher, loadMuted, saveMuted } from "./storage.js";
 
 // In-memory stand-in for the Web Storage API.
 function mockStore(initial = {}) {
@@ -51,5 +51,21 @@ describe("saveBestIfHigher", () => {
 
   it("does not throw and reports a new best when storage is unavailable", () => {
     expect(saveBestIfHigher(700, null)).toEqual({ best: 700, isNewBest: true });
+  });
+});
+
+describe("mute preference", () => {
+  it("defaults to false and round-trips through the store", () => {
+    const store = mockStore();
+    expect(loadMuted(store)).toBe(false);
+    saveMuted(true, store);
+    expect(loadMuted(store)).toBe(true);
+    saveMuted(false, store);
+    expect(loadMuted(store)).toBe(false);
+  });
+
+  it("is false and does not throw without storage", () => {
+    expect(loadMuted(null)).toBe(false);
+    expect(() => saveMuted(true, null)).not.toThrow();
   });
 });

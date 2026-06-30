@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import * as C from "../config.js";
 import { saveBestIfHigher } from "../storage.js";
+import { audio } from "../audio.js";
 
 // End-of-run screen. Shows the final score (and best score — placeholder until
 // T3). Tap / space / enter replays a fresh run; M returns to the menu.
@@ -104,6 +105,7 @@ export default class GameOverScene extends Phaser.Scene {
   }
 
   replay() {
+    audio.resume();
     this.scene.start("Game");
     this.scene.launch("Hud");
   }

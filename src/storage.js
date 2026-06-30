@@ -4,6 +4,7 @@
 // The `store` param is injectable so the logic is unit-testable without a DOM.
 // ============================================================================
 const KEY = "cable-rush:best";
+const MUTE_KEY = "cable-rush:muted";
 
 function defaultStore() {
   try {
@@ -40,4 +41,23 @@ export function saveBestIfHigher(score, store = defaultStore()) {
     return { best: score, isNewBest: true };
   }
   return { best: prev, isNewBest: false };
+}
+
+// Mute preference, defaulting to false (sound on) when unavailable.
+export function loadMuted(store = defaultStore()) {
+  if (!store) return false;
+  try {
+    return store.getItem(MUTE_KEY) === "1";
+  } catch (e) {
+    return false;
+  }
+}
+
+export function saveMuted(muted, store = defaultStore()) {
+  if (!store) return;
+  try {
+    store.setItem(MUTE_KEY, muted ? "1" : "0");
+  } catch (e) {
+    // unavailable — degrade gracefully
+  }
 }

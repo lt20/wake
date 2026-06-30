@@ -10,6 +10,7 @@ import {
 } from "../physics.js";
 import { pickModule, moduleFootprint } from "../modules.js";
 import { difficultyForElapsed } from "../difficulty.js";
+import { audio } from "../audio.js";
 
 const DEG = Phaser.Math.DEG_TO_RAD;
 
@@ -72,10 +73,15 @@ export default class GameScene extends Phaser.Scene {
     // Time-attack run timer
     this.timeLeft = C.RUN_DURATION;
 
+    this._lastMult = 1; // for combo-up sound edge detection
+
     this.setupInput();
     this.emitScore();
     this.emitSpeed();
     this.emitTime();
+
+    audio.startHum(); // cable tow drone for the run
+    this.events.once("shutdown", () => audio.stopHum());
 
     this.game.events.emit("message", "RIDE!", 900);
   }
@@ -240,6 +246,7 @@ export default class GameScene extends Phaser.Scene {
     this.gesture = { active: false, sx: 0, sy: 0, t0: 0, flicked: false };
 
     this.input.on("pointerdown", (p) => {
+      audio.resume(); // unlock audio on the first gesture
       this.gesture.active = true;
       this.gesture.sx = p.x;
       this.gesture.sy = p.y;
@@ -285,7 +292,15 @@ export default class GameScene extends Phaser.Scene {
     k.on("keydown-DOWN", () => this.doFlick(0, 100));
     k.on("keydown-LEFT", () => this.doFlick(-100, 0));
     k.on("keydown-RIGHT", () => this.doFlick(100, 0));
-    k.on("keydown-SPACE", () => this.doTap());
+    k.on("keydown-SPACE", () => {
+      audio.resume();
+      this.doTap();
+    });
+    k.on("keydown-M", () => {
+      const muted = audio.toggleMute();
+      if (!muted) audio.startHum();
+      this.game.events.emit("message", muted ? "SON OFF" : "SON ON", 500);
+    });
   }
 
   doTap() {
@@ -340,6 +355,7 @@ export default class GameScene extends Phaser.Scene {
     this.crouch = 0; // legs snap straight to push off
     this.activeRail = null;
     this.resetSurfaceSpin(); // spin in progress carries over via spinDeg/spinVel
+    audio.play(perfect ? "perfectPop" : "pop");
     if (perfect) {
       this.pending += C.PTS_PERFECT_POP;
       this.trickParts.push("Perfect Pop");
@@ -352,6 +368,7 @@ export default class GameScene extends Phaser.Scene {
     this.state = AIR;
     this.vy = -velocity;
     this.resetSurfaceSpin();
+    audio.play("pop");
   }
 
   land(clean, label) {
@@ -372,6 +389,7 @@ export default class GameScene extends Phaser.Scene {
       });
       this.multiplier += 1;
       this.comboTimer = C.COMBO_DECAY;
+      audio.play("land");
       if (name) this.game.events.emit("trick", name, gained, this.multiplier);
       if (label) this.game.events.emit("message", label, 600);
       this.emitScore();
@@ -393,6 +411,7 @@ export default class GameScene extends Phaser.Scene {
     this.trickParts = [];
     this.grabbing = false;
     this.splash();
+    audio.play("wipeout");
     this.game.events.emit("message", "WIPEOUT!", 700, true);
     this.emitCombo();
   }
@@ -438,6 +457,7 @@ export default class GameScene extends Phaser.Scene {
       this.comboTimer = C.COMBO_DECAY;
       this.emitScore();
       this.emitCombo();
+      audio.play("surfaceSpin");
       this.game.events.emit("trick", `Surface ${done * 180}`, gained, this.multiplier);
     }
   }
@@ -604,6 +624,7 @@ export default class GameScene extends Phaser.Scene {
         this.y = f.railTopY;
         this.vy = 0;
         this.crouch = 0.85; // bend on contact with the module
+        audio.play("grind");
         return;
       }
     }
@@ -876,6 +897,8 @@ export default class GameScene extends Phaser.Scene {
     this.game.events.emit("speed", Phaser.Math.Clamp(ratio, 0, 1));
   }
   emitCombo() {
+    if (this.multiplier > 1 && this.multiplier > this._lastMult) audio.play("comboUp");
+    this._lastMult = this.multiplier;
     this.game.events.emit("combo", this.multiplier);
   }
   emitTime() {

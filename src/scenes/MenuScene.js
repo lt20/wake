@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import * as C from "../config.js";
 import { loadBest } from "../storage.js";
+import { audio } from "../audio.js";
 
 // Title screen. Shows the best score (placeholder "--" until T3 wires storage)
 // and starts a run on tap / space / enter.
@@ -64,13 +65,29 @@ export default class MenuScene extends Phaser.Scene {
       repeat: -1,
     });
 
+    // Sound toggle (M), persisted across sessions.
+    this.muteText = this.add
+      .text(W / 2, H * 0.88, "", { ...font, fontSize: "24px", color: "#bfe9f0" })
+      .setOrigin(0.5);
+    this.refreshMuteLabel();
+    this.input.keyboard.on("keydown-M", () => {
+      audio.resume();
+      audio.toggleMute();
+      this.refreshMuteLabel();
+    });
+
     const start = () => this.startRun();
     this.input.on("pointerdown", start);
     this.input.keyboard.on("keydown-SPACE", start);
     this.input.keyboard.on("keydown-ENTER", start);
   }
 
+  refreshMuteLabel() {
+    this.muteText.setText(`SON : ${audio.isMuted() ? "OFF" : "ON"}  —  M`);
+  }
+
   startRun() {
+    audio.resume(); // unlock audio on this user gesture
     this.scene.start("Game");
     this.scene.launch("Hud");
   }
