@@ -13,6 +13,7 @@ export const BASE_SPEED = 360; // px/s scroll speed (the cable tow speed)
 export const MAX_SPEED = 560;
 export const MIN_SPEED = 220;
 export const SPEED_RECOVER = 60; // px/s per second back toward base after a bail
+export const RUN_DURATION = 90; // seconds per time-attack run, then Game Over
 
 // Air physics ----------------------------------------------------------------
 export const GRAVITY = 2400; // px/s^2

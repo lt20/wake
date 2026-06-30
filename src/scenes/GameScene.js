@@ -61,9 +61,13 @@ export default class GameScene extends Phaser.Scene {
     this.activeRail = null; // rail the rider is currently grinding
     this.popHintGiven = false;
 
+    // Time-attack run timer
+    this.timeLeft = C.RUN_DURATION;
+
     this.setupInput();
     this.emitScore();
     this.emitSpeed();
+    this.emitTime();
 
     this.game.events.emit("message", "RIDE!", 900);
   }
@@ -369,6 +373,17 @@ export default class GameScene extends Phaser.Scene {
   update(time, delta) {
     const dt = delta / 1000;
     if (dt > 0.05) return; // skip huge frame hitches
+
+    // run timer (time-attack) — counts down regardless of trick state; a
+    // wipeout never ends the run, only the clock running out does.
+    this.timeLeft -= dt;
+    if (this.timeLeft <= 0) {
+      this.timeLeft = 0;
+      this.emitTime();
+      this.endRun();
+      return;
+    }
+    this.emitTime();
 
     // scroll the world
     this.scrollX += this.speed * dt;
@@ -783,5 +798,14 @@ export default class GameScene extends Phaser.Scene {
   }
   emitCombo() {
     this.game.events.emit("combo", this.multiplier);
+  }
+  emitTime() {
+    this.game.events.emit("time", Math.max(0, this.timeLeft));
+  }
+
+  // End the run: tear down the HUD overlay and hand the final score to GameOver.
+  endRun() {
+    this.scene.stop("Hud");
+    this.scene.start("GameOver", { score: this.score });
   }
 }

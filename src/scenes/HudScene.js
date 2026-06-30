@@ -23,6 +23,17 @@ export default class HudScene extends Phaser.Scene {
       .text(36, 54, "0", { ...font, fontSize: "56px", fontStyle: "bold" })
       .setOrigin(0, 0);
 
+    // Run timer (time-attack) ------------------------------------------------
+    this.timeText = this.add
+      .text(W / 2, 30, this.formatTime(C.RUN_DURATION), {
+        ...font,
+        fontSize: "52px",
+        fontStyle: "bold",
+        stroke: "#06222b",
+        strokeThickness: 6,
+      })
+      .setOrigin(0.5, 0);
+
     // Combo multiplier -------------------------------------------------------
     this.multText = this.add
       .text(W - 36, 40, "", { ...font, fontSize: "60px", fontStyle: "bold", color: "#ffd23f" })
@@ -101,8 +112,19 @@ export default class HudScene extends Phaser.Scene {
   bindEvents() {
     const ev = this.game.events;
 
+    // The HUD is launched/stopped once per run; clear any listeners left over
+    // from a previous run so handlers don't accumulate on the global emitter.
+    ["score", "state", "combo", "trick", "speed", "message", "time"].forEach((e) =>
+      ev.off(e)
+    );
+
     ev.on("score", (s) => {
       this.scoreText.setText(this.format(s));
+    });
+
+    ev.on("time", (sec) => {
+      this.timeText.setText(this.formatTime(sec));
+      this.timeText.setColor(sec <= 10 ? "#ff4d6d" : "#ffffff");
     });
 
     ev.on("state", (state) => {
@@ -170,5 +192,12 @@ export default class HudScene extends Phaser.Scene {
 
   format(n) {
     return Math.round(n).toLocaleString("en-US");
+  }
+
+  formatTime(sec) {
+    const s = Math.ceil(sec);
+    const m = Math.floor(s / 60);
+    const r = s % 60;
+    return `${m}:${r.toString().padStart(2, "0")}`;
   }
 }

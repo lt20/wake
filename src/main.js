@@ -1,8 +1,10 @@
 import Phaser from "phaser";
 import { VIRTUAL_WIDTH, VIRTUAL_HEIGHT } from "./config.js";
 import BootScene from "./scenes/BootScene.js";
+import MenuScene from "./scenes/MenuScene.js";
 import GameScene from "./scenes/GameScene.js";
 import HudScene from "./scenes/HudScene.js";
+import GameOverScene from "./scenes/GameOverScene.js";
 
 const config = {
   type: Phaser.AUTO,
@@ -19,7 +21,7 @@ const config = {
     roundPixels: false,
     preserveDrawingBuffer: true,
   },
-  scene: [BootScene, GameScene, HudScene],
+  scene: [BootScene, MenuScene, GameScene, HudScene, GameOverScene],
 };
 
 window.addEventListener("error", (e) => {

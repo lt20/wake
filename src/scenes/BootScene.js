@@ -18,8 +18,7 @@ export default class BootScene extends Phaser.Scene {
     this.makeHills();
     this.makeCloud();
 
-    this.scene.start("Game");
-    this.scene.launch("Hud");
+    this.scene.start("Menu");
   }
 
   g() {
