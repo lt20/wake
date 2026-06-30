@@ -1,0 +1,33 @@
+# PROGRESS — Cable Rush « Playable v1 »
+
+> Tracker de la **ralph loop**. Source de vérité de l'avancement.
+> À chaque itération : choisir la 1ʳᵉ tâche `[ ]` dont les **dépendances** sont `[x]`,
+> l'implémenter, vérifier (`npm run build` + `npm test`), committer, puis **cocher ici**
+> avec le hash de commit court + une note d'une ligne.
+> Spec complète et critères d'acceptation : voir **[PRD.md](PRD.md)**.
+
+## Règles rapides
+- Build vert **obligatoire** avant chaque commit. Jamais committer un build cassé.
+- Un commit atomique par tâche.
+- Si bloqué après ~3 tentatives → `git restore .`, marquer `BLOCKED` + note, passer à la suite.
+- Ne pas démarrer une tâche dont une dépendance est `BLOCKED`.
+- Priorité cœur de la demande : **T1, T2, T4, T5, T6**.
+
+## Tâches
+
+- [ ] **T1** — vitest + extraction physique pure (`src/physics.js` + tests) — _dép : —_ ⟵ **EN PREMIER**
+- [ ] **T2** — Boucle Menu → Game → Game Over + run chronométré (90 s) — _dép : —_
+- [ ] **T3** — Meilleur score persistant (`localStorage`, `src/storage.js`) — _dép : T2_
+- [ ] **T4** — Rotations glissées au sol (eau/kicker/slide) sans wipeout — _dép : T1_
+- [ ] **T5** — Système de modules data-driven (`src/modules.js`, refactor sans régression) — _dép : T1_
+- [ ] **T6** — Catalogue ≥ 10 obstacles dont composites (slide→kicker, kicker→slide…) — _dép : T5, T4_
+- [ ] **T7** — Courbe de difficulté progressive (`src/difficulty.js`) — _dép : T1, T5_
+- [ ] **T8** — Son synthétisé Web Audio (`src/audio.js`) + mute — _dép : T2_
+- [ ] **T9** — Grabs directionnels (Indy/Method/Stalefish/Nose/Tail) — _dép : T1_
+- [ ] **T10** — Indicateur de rotation HUD — _dép : T1, T2_
+
+## Journal
+<!-- L'agent ajoute une ligne par tâche terminée :
+- T1 ✅ <hash> — vitest ajouté, physics.js extrait, 9 tests verts.
+- T6 ⛔ BLOCKED <raison>.
+-->
