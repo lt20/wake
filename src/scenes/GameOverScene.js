@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import * as C from "../config.js";
+import { saveBestIfHigher } from "../storage.js";
 
 // End-of-run screen. Shows the final score (and best score — placeholder until
 // T3). Tap / space / enter replays a fresh run; M returns to the menu.
@@ -42,9 +43,31 @@ export default class GameOverScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
-    // Best score — placeholder until T3 persists it.
+    // Persist & display the best score; celebrate a new record.
+    const { best, isNewBest } = saveBestIfHigher(this.finalScore);
+    if (isNewBest) {
+      const badge = this.add
+        .text(W / 2, H * 0.36, "NOUVEAU RECORD !", {
+          ...font,
+          fontSize: "40px",
+          fontStyle: "bold",
+          color: "#ffd23f",
+          stroke: "#06222b",
+          strokeThickness: 6,
+        })
+        .setOrigin(0.5);
+      this.tweens.add({
+        targets: badge,
+        scale: { from: 1.25, to: 1 },
+        duration: 260,
+        ease: "Back.out",
+        yoyo: true,
+        repeat: -1,
+        hold: 500,
+      });
+    }
     this.add
-      .text(W / 2, H * 0.63, "MEILLEUR : --", {
+      .text(W / 2, H * 0.63, `MEILLEUR : ${best.toLocaleString("en-US")}`, {
         ...font,
         fontSize: "32px",
         fontStyle: "bold",

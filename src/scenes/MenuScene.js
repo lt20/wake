@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import * as C from "../config.js";
+import { loadBest } from "../storage.js";
 
 // Title screen. Shows the best score (placeholder "--" until T3 wires storage)
 // and starts a run on tap / space / enter.
@@ -35,9 +36,10 @@ export default class MenuScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
-    // Best score — placeholder until T3 persists it.
+    // Best score, persisted across sessions.
+    const best = loadBest();
     this.add
-      .text(W / 2, H * 0.58, "MEILLEUR : --", {
+      .text(W / 2, H * 0.58, `MEILLEUR : ${best.toLocaleString("en-US")}`, {
         ...font,
         fontSize: "34px",
         fontStyle: "bold",
