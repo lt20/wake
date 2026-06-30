@@ -17,7 +17,7 @@
 
 - [x] **T1** — vitest + extraction physique pure (`src/physics.js` + tests) — _dép : —_ — `e5c4391` physics.js pur extrait de GameScene, 15 tests verts, build OK.
 - [x] **T2** — Boucle Menu → Game → Game Over + run chronométré (90 s) — _dép : —_ — `3f05d59` MenuScene + GameOverScene, timer 90 s, HUD temps, Boot→Menu.
-- [ ] **T3** — Meilleur score persistant (`localStorage`, `src/storage.js`) — _dép : T2_
+- [x] **T3** — Meilleur score persistant (`localStorage`, `src/storage.js`) — _dép : T2_ — `959b91a` storage.js + badge record, 8 tests.
 - [ ] **T4** — Rotations glissées au sol (eau/kicker/slide) sans wipeout — _dép : T1_
 - [ ] **T5** — Système de modules data-driven (`src/modules.js`, refactor sans régression) — _dép : T1_
 - [ ] **T6** — Catalogue ≥ 10 obstacles dont composites (slide→kicker, kicker→slide…) — _dép : T5, T4_
@@ -33,3 +33,4 @@
 -->
 - T1 ✅ e5c4391 — vitest ajouté, physics.js (5 fns pures) extrait de GameScene, 15 tests verts, build OK.
 - T2 ✅ 3f05d59 — boucle Menu→Game→GameOver, run chronométré 90 s, HUD affiche le temps, Boot démarre sur Menu.
+- T3 ✅ 959b91a — storage.js (localStorage, fallback gracieux), badge « NOUVEAU RECORD ! », meilleur affiché Menu+GameOver, 8 tests.
