@@ -90,10 +90,10 @@ export default class BootScene extends Phaser.Scene {
     const H = 84;
     const cx = 100;
     const surf = 50; // board top surface inside the texture
-    const thick = 8;
+    const thick = 10;
     const x0 = 16;
     const x1 = 184; // board spans x0..x1
-    const tipRise = 15;
+    const tipRise = 7; // subtle rocker — the board reads as one piece, not tips + a flat plank
     const backX = cx - 31; // wide stance
     const frontX = cx + 31;
     const g = this.g();
@@ -102,11 +102,6 @@ export default class BootScene extends Phaser.Scene {
       const t = (x - cx) / ((x1 - x0) / 2);
       return surf - Math.pow(Math.min(1, Math.abs(t)), 2.3) * tipRise;
     };
-
-    // fins under the board
-    g.fillStyle(0x2f6b78, 1);
-    g.fillTriangle(cx - 36, surf + thick, cx - 22, surf + thick, cx - 29, surf + thick + 12);
-    g.fillTriangle(cx + 22, surf + thick, cx + 36, surf + thick, cx + 29, surf + thick + 12);
 
     // board body (continuous rocker, upturned both ends)
     g.fillStyle(COLORS.board, 1);
