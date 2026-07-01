@@ -89,7 +89,7 @@ export default class HudScene extends Phaser.Scene {
     this.chargeW = 300;
     const cy = C.VIRTUAL_HEIGHT - 96;
     this.chargeLabel = this.add
-      .text(W / 2, cy - 22, "LOAD", { ...font, fontSize: "16px", color: "#9fe9e0" })
+      .text(W / 2, cy - 22, "EDGE", { ...font, fontSize: "16px", color: "#9fe9e0" })
       .setOrigin(0.5)
       .setVisible(false);
     this.chargeBarBg = this.add
@@ -110,14 +110,14 @@ export default class HudScene extends Phaser.Scene {
       .text(
         C.VIRTUAL_WIDTH / 2,
         C.VIRTUAL_HEIGHT - 40,
-        "HOLD SPACE = load & pop  •  hold ↑↓ = flips  •  hold ←→ = spins  •  E/S/D/X = grabs  •  land upright!",
+        "MAINTENIR = charger l'edge & pop  •  en l'air : glisse = rotation, 2e doigt = grab  •  (clavier : ESPACE, flèches, E/S/D/X)  •  réception droite !",
         { ...font, fontSize: "20px", color: "#bfe9f0" }
       )
       .setOrigin(0.5);
 
-    // Contextual air prompt — makes the grab obvious while airborne
+    // Contextual air prompt — makes the trick controls obvious while airborne
     this.airPrompt = this.add
-      .text(C.VIRTUAL_WIDTH / 2, C.VIRTUAL_HEIGHT / 2 + 80, "E S D X = GRAB  ·  release before landing", {
+      .text(C.VIRTUAL_WIDTH / 2, C.VIRTUAL_HEIGHT / 2 + 80, "GLISSE = rotation  ·  2e DOIGT = grab  ·  relâche avant de poser", {
         ...font,
         fontSize: "26px",
         fontStyle: "bold",
@@ -166,7 +166,7 @@ export default class HudScene extends Phaser.Scene {
 
     ev.on("rotation", (r) => this.drawRotation(r));
 
-    ev.on("charge", (ratio, active) => {
+    ev.on("charge", (ratio, active, edgeDir = 0) => {
       this.chargeLabel.setVisible(active);
       this.chargeBarBg.setVisible(active);
       this.chargeFill.setVisible(active);
@@ -174,6 +174,10 @@ export default class HudScene extends Phaser.Scene {
       this.chargeFill.width = this.chargeW * ratio;
       this.chargeFill.fillColor =
         ratio > 0.85 ? 0xff4d6d : ratio > 0.55 ? 0xffd23f : C.COLORS.accent;
+      // On the water, name the edge side being held.
+      this.chargeLabel.setText(
+        edgeDir < 0 ? "EDGE ◄ HEELSIDE" : edgeDir > 0 ? "TOESIDE ► EDGE" : "EDGE"
+      );
     });
 
     ev.on("combo", (mult) => {

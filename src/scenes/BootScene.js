@@ -1,24 +1,61 @@
 import Phaser from "phaser";
 import { COLORS, VIRTUAL_WIDTH } from "../config.js";
 import { MODULES } from "../modules.js";
+import { ASSETS_ENABLED, IMAGE_ATLAS, RIDER_ANIMS } from "../assets.js";
 
-// Generates every visual procedurally so the game runs with zero asset files.
-// Each texture is hand-drawn with Graphics then baked. Swap for real art later.
+// "Fallback procedural" boot: OPTIONALLY load real art (see assets.js), then
+// generate — procedurally — any texture a real asset did not provide. With no
+// asset files (the default) every texture is generated exactly as before; drop
+// real art into public/assets and it takes over key-by-key with no code change.
 export default class BootScene extends Phaser.Scene {
   constructor() {
     super("Boot");
   }
 
+  preload() {
+    if (!ASSETS_ENABLED) return; // no asset files present → skip (avoid 404s)
+    // Missing files just fail to load; create() then fills the gap procedurally.
+    this.load.on("loaderror", () => {}); // swallow — fallback handles it
+    this.load.atlas(IMAGE_ATLAS.key, IMAGE_ATLAS.texture, IMAGE_ATLAS.atlas);
+  }
+
+  // Generate a texture procedurally only if a real asset did not already supply
+  // it, so loaded art wins and everything else falls back.
+  fallback(key, make) {
+    if (!this.textures.exists(key)) make.call(this);
+  }
+
   create() {
-    this.makeBody();
-    this.makeBoard();
-    this.makeModuleTextures();
-    this.makeParticles();
-    this.makeSky();
-    this.makeHills();
-    this.makeCloud();
+    this.fallback("body", this.makeBody);
+    this.fallback("board", this.makeBoard);
+    this.makeModuleTextures(); // per-key guarded internally
+    this.fallback("spray", this.makeParticles); // makes spray + spark
+    this.fallback("sky", this.makeSky);
+    this.fallback("hills", this.makeHills); // makes mountains + hillsFar + hills
+    this.fallback("cloud", this.makeCloud);
+    this.registerRiderAnims();
 
     this.scene.start("Menu");
+  }
+
+  // If a rider atlas was loaded, build the per-state animations that
+  // GameScene.applyRiderSkin() plays. A no-op with no atlas (procedural rider).
+  registerRiderAnims() {
+    if (!this.textures.exists(IMAGE_ATLAS.key)) return;
+    for (const [state, def] of Object.entries(RIDER_ANIMS)) {
+      const key = `rider_${state}`;
+      if (this.anims.exists(key)) continue;
+      this.anims.create({
+        key,
+        frames: this.anims.generateFrameNames(IMAGE_ATLAS.key, {
+          prefix: def.prefix,
+          start: 0,
+          end: def.end,
+        }),
+        frameRate: def.frameRate,
+        repeat: def.repeat,
+      });
+    }
   }
 
   g() {
@@ -35,7 +72,6 @@ export default class BootScene extends Phaser.Scene {
     const g = this.g();
 
     const skin = 0xe7b48c;
-    const hair = 0x2c2118;
     const vest = 0x223a4c;
     const vestAccent = COLORS.rider;
 
@@ -66,13 +102,25 @@ export default class BootScene extends Phaser.Scene {
     g.lineTo(head[0], head[1] + 10);
     g.strokePath();
 
-    // head + hair
+    // head + helmet (near-universal at a cable park, especially on the modules)
+    const helmet = 0x1c2b3a;
+    const RAD = Phaser.Math.DEG_TO_RAD;
     g.fillStyle(skin, 1);
     g.fillCircle(head[0], head[1], 14);
-    g.fillStyle(hair, 1);
-    g.slice(head[0], head[1] - 1, 15, Phaser.Math.DEG_TO_RAD * 168, Phaser.Math.DEG_TO_RAD * 372, false);
+    // helmet dome over the top ~2/3 of the head
+    g.fillStyle(helmet, 1);
+    g.slice(head[0], head[1], 16, RAD * 150, RAD * 390, false);
     g.fillPath();
-    g.fillTriangle(head[0] + 7, head[1] - 12, head[0] + 20, head[1] - 18, head[0] + 14, head[1] - 1);
+    // accent stripe + a small ear pad, plus a chin strap down to the jaw
+    g.fillStyle(vestAccent, 1);
+    g.fillRoundedRect(head[0] - 15, head[1] - 4, 30, 4, 2);
+    g.fillStyle(helmet, 1);
+    g.fillCircle(head[0] - 10, head[1] + 4, 5); // ear pad
+    g.lineStyle(3, helmet, 1);
+    g.beginPath();
+    g.moveTo(head[0] - 12, head[1] + 6);
+    g.lineTo(head[0] - 4, head[1] + 13);
+    g.strokePath();
 
     g.generateTexture("body", W, H);
     g.destroy();
@@ -149,6 +197,7 @@ export default class BootScene extends Phaser.Scene {
       for (const s of m.segments) {
         if (seen.has(s.texture)) continue;
         seen.add(s.texture);
+        if (this.textures.exists(s.texture)) continue; // a real asset supplied it
         if (s.kind === "ride-up") this.drawRideUp(s);
         else if (s.kind === "grind") this.drawGrind(s);
         else if (s.kind === "decor") this.drawDecor(s);
@@ -335,6 +384,7 @@ export default class BootScene extends Phaser.Scene {
       g.generateTexture(key, w, h);
       g.destroy();
     };
+    drawHills("mountains", 0x1a4a5e, 96, 150, 22); // farthest, tallest, desaturated
     drawHills("hillsFar", COLORS.hillsFar, 38, 150, 16);
     drawHills("hills", COLORS.hills, 64, 210, 12);
   }

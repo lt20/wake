@@ -9,6 +9,13 @@ import {
   scoreLanding,
   buildTrickName,
   grabName,
+  airInputFromDrag,
+  airStep,
+  edgeLoadAfter,
+  popVelocityFromLoad,
+  edgeName,
+  handlePassState,
+  signatureBonus,
 } from "./physics.js";
 
 describe("landingError", () => {
@@ -101,6 +108,118 @@ describe("grabName", () => {
   });
 });
 
+describe("airInputFromDrag", () => {
+  it("is neutral below the threshold on both axes", () => {
+    expect(airInputFromDrag(5, -5, 26, 480)).toEqual({
+      spinVel: 0,
+      flipVel: 0,
+      rotating: false,
+    });
+  });
+
+  it("maps a horizontal drag to a spin (sign-preserving)", () => {
+    expect(airInputFromDrag(40, 0, 26, 480)).toEqual({
+      spinVel: 480,
+      flipVel: 0,
+      rotating: true,
+    });
+    expect(airInputFromDrag(-40, 0, 26, 480).spinVel).toBe(-480);
+  });
+
+  it("maps a vertical drag to a flip (sign-preserving)", () => {
+    expect(airInputFromDrag(0, 50, 26, 480).flipVel).toBe(480);
+    expect(airInputFromDrag(0, -50, 26, 480).flipVel).toBe(-480);
+  });
+
+  it("rotates on BOTH axes for a diagonal drag (like holding two arrows)", () => {
+    expect(airInputFromDrag(40, -40, 26, 480)).toEqual({
+      spinVel: 480,
+      flipVel: -480,
+      rotating: true,
+    });
+  });
+});
+
+describe("airStep", () => {
+  it("accelerates downward under gravity", () => {
+    const { y, vy } = airStep(100, 0, 0.5, { gravity: 1720, maxFall: 1500 });
+    expect(vy).toBeCloseTo(860);
+    expect(y).toBeCloseTo(100 + 860 * 0.5);
+  });
+
+  it("clamps the fall speed to the terminal value", () => {
+    const { vy } = airStep(0, 1490, 0.1, { gravity: 1720, maxFall: 1500 });
+    expect(vy).toBe(1500);
+  });
+
+  it("a gentler gravity floats longer than free fall for the same launch", () => {
+    const float = airStep(0, -720, 0.1, { gravity: 1720, maxFall: 1500 }).vy;
+    const heavy = airStep(0, -720, 0.1, { gravity: 2400, maxFall: 1500 }).vy;
+    expect(float).toBeLessThan(heavy); // still rising faster (less decelerated)
+  });
+});
+
+describe("edgeLoadAfter", () => {
+  it("builds toward 1 while edging and clamps there", () => {
+    expect(edgeLoadAfter(0, 0.55, true, 1.1, 1.8)).toBeCloseTo(0.5);
+    expect(edgeLoadAfter(0.9, 1.0, true, 1.1, 1.8)).toBe(1);
+  });
+
+  it("decays toward 0 once released and clamps there", () => {
+    expect(edgeLoadAfter(1, 0.9, false, 1.1, 1.8)).toBeCloseTo(0.5);
+    expect(edgeLoadAfter(0.1, 1.0, false, 1.1, 1.8)).toBe(0);
+  });
+});
+
+describe("popVelocityFromLoad", () => {
+  it("interpolates min→max by load", () => {
+    expect(popVelocityFromLoad(0, 530, 1050, false, 320)).toBe(530);
+    expect(popVelocityFromLoad(1, 530, 1050, false, 320)).toBe(1050);
+    expect(popVelocityFromLoad(0.5, 530, 1050, false, 320)).toBe(790);
+  });
+
+  it("adds the perfect bonus and clamps out-of-range load", () => {
+    expect(popVelocityFromLoad(1, 530, 1050, true, 320)).toBe(1370);
+    expect(popVelocityFromLoad(2, 530, 1050, false, 320)).toBe(1050);
+  });
+});
+
+describe("edgeName", () => {
+  it("names heelside / toeside by direction", () => {
+    expect(edgeName(-1)).toBe("Heelside");
+    expect(edgeName(1)).toBe("Toeside");
+    expect(edgeName(0)).toBe(null);
+  });
+
+  it("swaps sides in switch stance", () => {
+    expect(edgeName(-1, 1)).toBe("Toeside");
+    expect(edgeName(1, 1)).toBe("Heelside");
+  });
+});
+
+describe("handlePassState", () => {
+  it("holds the handle in front, lead hand, when facing forward", () => {
+    expect(handlePassState(0, 40)).toEqual({ behind: false, hand: 0, passProgress: 0 });
+  });
+
+  it("routes the handle behind the back at 180 (pass fully committed)", () => {
+    expect(handlePassState(180, 40)).toEqual({ behind: true, hand: 1, passProgress: 1 });
+  });
+
+  it("is behind through the away-facing arc and swaps hands at 180", () => {
+    expect(handlePassState(120, 40).behind).toBe(true);
+    expect(handlePassState(120, 40).hand).toBe(0);
+    expect(handlePassState(240, 40).hand).toBe(1);
+    expect(handlePassState(60, 40).behind).toBe(false);
+  });
+
+  it("wraps across multiple turns and is sign-agnostic (mod 360)", () => {
+    expect(handlePassState(540, 40).behind).toBe(true); // 540 → 180
+    expect(handlePassState(-180, 40).behind).toBe(true);
+    expect(handlePassState(360, 40).behind).toBe(false); // full turn back to front
+  });
+});
+
 describe("countRotations", () => {
   it("counts multiple flips and spins", () => {
     expect(countRotations(720, 540)).toEqual({ flips: 2, spins: 3 });
@@ -149,5 +268,39 @@ describe("buildTrickName", () => {
     expect(
       buildTrickName({ flipDeg: 0, spinDeg: -180, extras: ["Grind"] })
     ).toBe("BS 180 + Grind");
+  });
+
+  it("names a Raley (board out behind), overriding the flip", () => {
+    expect(buildTrickName({ flipDeg: 0, spinDeg: 0, raley: true })).toBe("Raley");
+    expect(buildTrickName({ flipDeg: 0, spinDeg: 180, raley: true })).toBe("Raley + FS 180");
+  });
+
+  it("names an edged backroll a Tantrum", () => {
+    expect(buildTrickName({ flipDeg: -360, spinDeg: 0, edged: true })).toBe("Tantrum");
+    // a frontroll off the edge is NOT a tantrum
+    expect(buildTrickName({ flipDeg: 360, spinDeg: 0, edged: true })).toBe("Frontroll");
+  });
+
+  it("prefixes Switch and suffixes to blind", () => {
+    expect(
+      buildTrickName({ flipDeg: -360, spinDeg: 0, switchStance: true })
+    ).toBe("Switch Backroll");
+    expect(
+      buildTrickName({ flipDeg: 0, spinDeg: 180, landsBlind: true })
+    ).toBe("FS 180 to blind");
+  });
+});
+
+describe("signatureBonus", () => {
+  it("is zero for a plain trick", () => {
+    expect(signatureBonus({})).toBe(0);
+  });
+
+  it("sums the flagged signature bonuses", () => {
+    expect(signatureBonus({ raley: true })).toBe(C.PTS_RALEY);
+    expect(signatureBonus({ tantrum: true, switchStance: true })).toBe(
+      C.PTS_TANTRUM + C.PTS_SWITCH_TAKEOFF
+    );
+    expect(signatureBonus({ landsBlind: true })).toBe(C.PTS_BLIND_LAND);
   });
 });

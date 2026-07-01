@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import * as C from "../config.js";
-import { saveBestIfHigher } from "../storage.js";
+import { saveBestIfHigher, loadProfile, saveProfile } from "../storage.js";
+import { applyRun } from "../progression.js";
 import { audio } from "../audio.js";
 
 // End-of-run screen. Shows the final score (and best score — placeholder until
@@ -12,6 +13,12 @@ export default class GameOverScene extends Phaser.Scene {
 
   init(data) {
     this.finalScore = (data && data.score) || 0;
+    this.summary = (data && data.summary) || {
+      score: this.finalScore,
+      bestCombo: 1,
+      tricksLanded: 0,
+      wipeouts: 0,
+    };
   }
 
   create() {
@@ -68,7 +75,7 @@ export default class GameOverScene extends Phaser.Scene {
       });
     }
     this.add
-      .text(W / 2, H * 0.63, `MEILLEUR : ${best.toLocaleString("en-US")}`, {
+      .text(W / 2, H * 0.6, `MEILLEUR : ${best.toLocaleString("en-US")}`, {
         ...font,
         fontSize: "32px",
         fontStyle: "bold",
@@ -76,8 +83,33 @@ export default class GameOverScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
+    // Progression: bank coins + missions into the persistent profile and show
+    // what this run earned.
+    const profile = loadProfile();
+    const res = applyRun(this.summary, profile);
+    saveProfile(res.profile, undefined); // default store
+    this.add
+      .text(
+        W / 2,
+        H * 0.68,
+        `+${res.coinsAwarded} PIÈCES  (total ${res.profile.coins.toLocaleString("en-US")})`,
+        { ...font, fontSize: "26px", fontStyle: "bold", color: "#9fe9e0" }
+      )
+      .setOrigin(0.5);
+    if (res.completed.length) {
+      this.add
+        .text(W / 2, H * 0.73, "✓ " + res.completed.join("   ✓ "), {
+          ...font,
+          fontSize: "20px",
+          color: "#33d6c8",
+          align: "center",
+          wordWrap: { width: W * 0.8 },
+        })
+        .setOrigin(0.5);
+    }
+
     const prompt = this.add
-      .text(W / 2, H * 0.78, "TAP pour rejouer", {
+      .text(W / 2, H * 0.82, "TAP pour rejouer", {
         ...font,
         fontSize: "40px",
         fontStyle: "bold",

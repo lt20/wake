@@ -21,7 +21,12 @@ export const SPEED_RECOVER = 60; // px/s per second back toward base after a bai
 export const RUN_DURATION = 90; // seconds per time-attack run, then Game Over
 
 // Air physics ----------------------------------------------------------------
-export const GRAVITY = 2400; // px/s^2
+export const GRAVITY = 2400; // px/s^2 (reference; wipeout tumble still uses it)
+// On the cable the rider hangs on the line, so the arc is floatier than free
+// fall: a gentler air gravity + a terminal fall speed give the pendular hang
+// time real cable air has. Kicker pops are tuned down to match (see below).
+export const AIR_GRAVITY = 1720; // px/s^2 effective gravity while airborne (~0.72*G)
+export const AIR_MAX_FALL = 1500; // px/s terminal fall speed (floaty descent)
 export const POP_VELOCITY = 720; // base launch velocity off a kicker
 export const PERFECT_POP_BONUS = 320; // extra launch for a well-timed pop
 export const POP_WINDOW = 0.2; // seconds around the lip that count as "perfect"
@@ -31,14 +36,26 @@ export const FLAT_OLLIE_VELOCITY = 600; // pop off flat water
 // Hold the pop button to load the board; release to launch. A quick tap gives a
 // small hop (enough to step onto a slide); a full ~1.5 s load sends you high.
 export const CHARGE_MAX_TIME = 1.5; // seconds of hold to reach a full load
-// A tap must still clear a slide's height (~64px → v≈555), so the floor sits a
-// little above that; a full load roughly doubles it for big air.
+// DEPRECATED (pre-edge model): the chargeable flat-water "ollie". On a cable
+// there is no wake to jump off flat water, so this was replaced by EDGE_FLAT_HOP
+// (a tiny non-scoring hop) + the edge-loaded kicker pop. Kept for reference.
 export const POP_MIN_VELOCITY = 600; // quick tap on flat water (hop onto a slide)
 export const POP_MAX_VELOCITY = 1150; // fully-loaded pop on flat water
-export const KICKER_POP_MIN = 620; // off the lip with no load
-export const KICKER_POP_MAX = 1240; // off the lip with a full load
+// Tuned ~15% below the pre-AIR_GRAVITY values: the floatier air lengthens hang
+// time for the same launch, so a gentler pop reaches the same height.
+export const KICKER_POP_MIN = 530; // off the lip with no load
+export const KICKER_POP_MAX = 1050; // off the lip with a full load
 export const GRIND_POP_MIN = 340; // off a rail with no load
 export const GRIND_POP_MAX = 720; // off a rail with a full load
+
+// Edge / carve load ----------------------------------------------------------
+// On a cable there is no wake: you don't "ollie" off flat water. You hold an
+// edge (heelside/toeside) on the approach to load energy, and the kicker throws
+// you. Hold the pop button on the water to edge; steer ←/→ to pick the side.
+export const EDGE_LOAD_TIME = 1.1; // s of edging to reach a full load
+export const EDGE_DECAY_TIME = 1.8; // s for the load to bleed off once released
+export const EDGE_FLAT_HOP = 200; // tiny, non-scoring hop off flat water (onto a slide)
+export const EDGE_LEAN_MAX = 0.55; // rad of extra body lean at a full edge
 
 // Kicker geometry — the rider climbs this triangular ramp to the lip
 export const KICKER_RISE = 122; // px the lip sits above the water
@@ -46,6 +63,13 @@ export const KICKER_WIDTH = 240; // horizontal length of the ramp
 
 // Rider rendering
 export const RIDER_SCALE = 0.82; // base display scale of the rider sprite
+
+// Handle pass ----------------------------------------------------------------
+// The window (± degrees around each 180°) over which the tow handle reads as
+// passing behind the back. Visual only — a missed pass does NOT wipe you out
+// (that would add an in-air wipeout path and break the landing invariant).
+export const HANDLE_PASS_WINDOW_DEG = 40;
+export const HANDLE_PASS_FAIL_ENABLED = false;
 
 // Trick rotation -------------------------------------------------------------
 export const FLIP_IMPULSE = 430; // deg/s added per vertical flick (roll)
@@ -65,6 +89,11 @@ export const PTS_GRAB_PER_SEC = 900; // grab points accrue while held
 export const PTS_GRIND_PER_SEC = 700; // grind points accrue while sliding
 export const PTS_PERFECT_POP = 250;
 export const PTS_PERFECT_LAND = 400;
+// Signature-trick bonuses (banked via `pending` on a clean landing).
+export const PTS_RALEY = 500;
+export const PTS_TANTRUM = 400;
+export const PTS_SWITCH_TAKEOFF = 200;
+export const PTS_BLIND_LAND = 300;
 export const COMBO_DECAY = 1.6; // seconds the combo window stays open on the ground
 
 // Gesture thresholds ---------------------------------------------------------
