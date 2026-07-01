@@ -84,19 +84,40 @@ export default class HudScene extends Phaser.Scene {
       .rectangle(122, C.VIRTUAL_HEIGHT - 46, 0, 12, C.COLORS.accent)
       .setOrigin(0, 0);
 
+    // Load / pop charge bar (surface only) — fills while the pop button is held.
+    // A quick tap barely moves it (small hop); a long hold fills it for big air.
+    this.chargeW = 300;
+    const cy = C.VIRTUAL_HEIGHT - 96;
+    this.chargeLabel = this.add
+      .text(W / 2, cy - 22, "LOAD", { ...font, fontSize: "16px", color: "#9fe9e0" })
+      .setOrigin(0.5)
+      .setVisible(false);
+    this.chargeBarBg = this.add
+      .rectangle(W / 2, cy, this.chargeW + 6, 22, 0x06222b)
+      .setStrokeStyle(2, 0x2f6b78)
+      .setVisible(false);
+    this.chargeFill = this.add
+      .rectangle(W / 2 - this.chargeW / 2, cy, 0, 14, C.COLORS.accent)
+      .setOrigin(0, 0.5)
+      .setVisible(false);
+    // tick marking the "just a tap" threshold vs a real load
+    this.chargeTick = this.add
+      .rectangle(W / 2 - this.chargeW / 2 + this.chargeW * 0.12, cy, 2, 16, 0xffffff, 0.5)
+      .setVisible(false);
+
     // Controls hint ----------------------------------------------------------
     this.hint = this.add
       .text(
         C.VIRTUAL_WIDTH / 2,
         C.VIRTUAL_HEIGHT - 40,
-        "TAP = pop  •  swipe ↕ = flips  •  swipe ↔ = spins  •  HOLD (Shift) = grab  •  land upright!",
+        "HOLD SPACE = load & pop  •  hold ↑↓ = flips  •  hold ←→ = spins  •  E/S/D/X = grabs  •  land upright!",
         { ...font, fontSize: "20px", color: "#bfe9f0" }
       )
       .setOrigin(0.5);
 
     // Contextual air prompt — makes the grab obvious while airborne
     this.airPrompt = this.add
-      .text(C.VIRTUAL_WIDTH / 2, C.VIRTUAL_HEIGHT / 2 + 80, "HOLD / Shift = GRAB  ·  release before landing", {
+      .text(C.VIRTUAL_WIDTH / 2, C.VIRTUAL_HEIGHT / 2 + 80, "E S D X = GRAB  ·  release before landing", {
         ...font,
         fontSize: "26px",
         fontStyle: "bold",
@@ -120,7 +141,7 @@ export default class HudScene extends Phaser.Scene {
 
     // The HUD is launched/stopped once per run; clear any listeners left over
     // from a previous run so handlers don't accumulate on the global emitter.
-    ["score", "state", "combo", "trick", "speed", "message", "time", "rotation"].forEach(
+    ["score", "state", "combo", "trick", "speed", "message", "time", "rotation", "charge"].forEach(
       (e) => ev.off(e)
     );
 
@@ -144,6 +165,16 @@ export default class HudScene extends Phaser.Scene {
     });
 
     ev.on("rotation", (r) => this.drawRotation(r));
+
+    ev.on("charge", (ratio, active) => {
+      this.chargeLabel.setVisible(active);
+      this.chargeBarBg.setVisible(active);
+      this.chargeFill.setVisible(active);
+      this.chargeTick.setVisible(active);
+      this.chargeFill.width = this.chargeW * ratio;
+      this.chargeFill.fillColor =
+        ratio > 0.85 ? 0xff4d6d : ratio > 0.55 ? 0xffd23f : C.COLORS.accent;
+    });
 
     ev.on("combo", (mult) => {
       if (mult > 1) {
