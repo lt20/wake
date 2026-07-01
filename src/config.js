@@ -6,6 +6,11 @@
 export const VIRTUAL_WIDTH = 1280;
 export const VIRTUAL_HEIGHT = 720;
 
+// Camera / framing -----------------------------------------------------------
+// Zoom < 1 pulls the camera back so the rider sits further away and the tow
+// rope reads longer. Backgrounds are drawn oversized to cover the reveal.
+export const CAMERA_ZOOM = 0.62;
+
 // World / rider --------------------------------------------------------------
 export const RIDER_SCREEN_X = 380; // rider stays fixed here; world scrolls past
 export const WATER_Y = 540; // y of the water surface (ride line)
@@ -13,6 +18,7 @@ export const BASE_SPEED = 360; // px/s scroll speed (the cable tow speed)
 export const MAX_SPEED = 560;
 export const MIN_SPEED = 220;
 export const SPEED_RECOVER = 60; // px/s per second back toward base after a bail
+export const RUN_DURATION = 90; // seconds per time-attack run, then Game Over
 
 // Air physics ----------------------------------------------------------------
 export const GRAVITY = 2400; // px/s^2
@@ -20,6 +26,19 @@ export const POP_VELOCITY = 720; // base launch velocity off a kicker
 export const PERFECT_POP_BONUS = 320; // extra launch for a well-timed pop
 export const POP_WINDOW = 0.2; // seconds around the lip that count as "perfect"
 export const FLAT_OLLIE_VELOCITY = 600; // pop off flat water
+
+// Load & pop (charge) --------------------------------------------------------
+// Hold the pop button to load the board; release to launch. A quick tap gives a
+// small hop (enough to step onto a slide); a full ~1.5 s load sends you high.
+export const CHARGE_MAX_TIME = 1.5; // seconds of hold to reach a full load
+// A tap must still clear a slide's height (~64px → v≈555), so the floor sits a
+// little above that; a full load roughly doubles it for big air.
+export const POP_MIN_VELOCITY = 600; // quick tap on flat water (hop onto a slide)
+export const POP_MAX_VELOCITY = 1150; // fully-loaded pop on flat water
+export const KICKER_POP_MIN = 620; // off the lip with no load
+export const KICKER_POP_MAX = 1240; // off the lip with a full load
+export const GRIND_POP_MIN = 340; // off a rail with no load
+export const GRIND_POP_MAX = 720; // off a rail with a full load
 
 // Kicker geometry — the rider climbs this triangular ramp to the lip
 export const KICKER_RISE = 122; // px the lip sits above the water
@@ -31,13 +50,17 @@ export const RIDER_SCALE = 0.82; // base display scale of the rider sprite
 // Trick rotation -------------------------------------------------------------
 export const FLIP_IMPULSE = 430; // deg/s added per vertical flick (roll)
 export const SPIN_IMPULSE = 360; // deg/s added per horizontal flick (yaw)
+export const ROT_RATE = 480; // deg/s of held-key rotation in the air (stops on release)
+export const SURFACE_SPIN_IMPULSE = 300; // deg/s per horizontal flick while grounded
+export const SURFACE_SPIN_FRICTION = 1.6; // per-second decay of grounded yaw velocity
 export const ROT_MAX = 1100; // clamp angular velocity (deg/s)
 export const LAND_FLIP_TOLERANCE = 42; // deg from an upright multiple of 360
 export const LAND_SPIN_TOLERANCE = 48; // deg from a clean multiple of 180
 
 // Scoring --------------------------------------------------------------------
 export const PTS_PER_FLIP = 500; // per completed roll (360 of flip)
-export const PTS_PER_SPIN = 300; // per 180 of spin
+export const PTS_PER_SPIN = 300; // per 180 of spin (in the air)
+export const PTS_SURFACE_SPIN_PER_180 = 150; // per 180 of spin on the surface (ground/module)
 export const PTS_GRAB_PER_SEC = 900; // grab points accrue while held
 export const PTS_GRIND_PER_SEC = 700; // grind points accrue while sliding
 export const PTS_PERFECT_POP = 250;

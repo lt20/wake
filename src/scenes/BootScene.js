@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { COLORS, VIRTUAL_WIDTH } from "../config.js";
+import { MODULES } from "../modules.js";
 
 // Generates every visual procedurally so the game runs with zero asset files.
 // Each texture is hand-drawn with Graphics then baked. Swap for real art later.
@@ -10,41 +11,40 @@ export default class BootScene extends Phaser.Scene {
 
   create() {
     this.makeBody();
-    this.makeBodyViews();
-    this.makeHead();
     this.makeBoard();
-    this.makeKicker();
-    this.makeRail();
+    this.makeModuleTextures();
     this.makeParticles();
     this.makeSky();
     this.makeHills();
     this.makeCloud();
 
-    this.scene.start("Game");
-    this.scene.launch("Hud");
+    this.scene.start("Menu");
   }
 
   g() {
     return this.make.graphics({ x: 0, y: 0, add: false });
   }
 
-  // The wakeboarder's TORSO only (the life vest), front-profile / regular stance.
-  // The HEAD is a separate sprite (makeHead) so it can stay in profile while the
-  // torso turns front/back; LEGS + ARMS are drawn procedurally each frame. Origin
-  // is the HIP (bottom-center), so the torso hangs off the top of the legs.
+  // The wakeboarder's UPPER BODY only (torso + arms + head + handle). Legs are
+  // drawn procedurally each frame so they can flex/extend. Leaned-back stance,
+  // both arms out front gripping the handle. Origin is the HIP (bottom-center),
+  // so the body can be hung off the top of the procedural legs.
   makeBody() {
     const W = 96;
     const H = 130;
     const g = this.g();
 
+    const skin = 0xe7b48c;
+    const hair = 0x2c2118;
     const vest = 0x223a4c;
     const vestAccent = COLORS.rider;
 
     // neutral, near-vertical torso (lean is applied dynamically at runtime).
     const hip = [48, 122];
     const shoulder = [48, 50];
+    const head = [48, 26];
 
-    // torso / life vest (front-profile: accent zip down the chest)
+    // torso / life vest
     g.fillStyle(vest, 1);
     g.beginPath();
     g.moveTo(shoulder[0] - 16, shoulder[1] - 4);
@@ -53,121 +53,33 @@ export default class BootScene extends Phaser.Scene {
     g.lineTo(hip[0] - 13, hip[1]);
     g.closePath();
     g.fillPath();
+    // accent panel down the front
     g.fillStyle(vestAccent, 1);
     g.fillRoundedRect(shoulder[0] - 9, shoulder[1], 18, 52, 6);
     g.fillStyle(0xffffff, 0.16);
     g.fillRoundedRect(shoulder[0] - 4, shoulder[1] + 4, 4, 44, 2);
 
-    g.generateTexture("body", W, H);
-    g.destroy();
-
-    // origin at the hip; shoulder offset (from hip) is where the head/arms attach
-    this.registry.set("bodyOrigin", { x: hip[0] / W, y: hip[1] / H });
-    this.registry.set("bodyShoulder", { x: shoulder[0] - hip[0], y: shoulder[1] - hip[1] });
-  }
-
-  // The head, ALWAYS drawn as a right-facing PROFILE (looks toward the pull). A
-  // standalone sprite layered over the torso so it never mirrors with the stance
-  // and can later spin independently during tricks. Origin = neck base (where it
-  // meets the shoulder).
-  makeHead() {
-    const W = 44;
-    const H = 50;
-    const skin = 0xe7b48c;
-    const hair = 0x2c2118;
-    const cx = 22;
-    const neckBase = 46; // origin y (sits on the shoulder)
-    const hy = 18; // head centre
-    const g = this.g();
-
     // neck
     g.lineStyle(12, skin, 1);
     g.beginPath();
-    g.moveTo(cx, neckBase);
-    g.lineTo(cx, hy + 10);
+    g.moveTo(shoulder[0], shoulder[1]);
+    g.lineTo(head[0], head[1] + 10);
     g.strokePath();
-    // head + hair (profile facing right, hair sweeps back)
+
+    // head + hair
     g.fillStyle(skin, 1);
-    g.fillCircle(cx, hy, 14);
+    g.fillCircle(head[0], head[1], 14);
     g.fillStyle(hair, 1);
-    g.slice(cx, hy - 1, 15, Phaser.Math.DEG_TO_RAD * 168, Phaser.Math.DEG_TO_RAD * 372, false);
+    g.slice(head[0], head[1] - 1, 15, Phaser.Math.DEG_TO_RAD * 168, Phaser.Math.DEG_TO_RAD * 372, false);
     g.fillPath();
-    g.fillTriangle(cx + 7, hy - 12, cx + 20, hy - 18, cx + 14, hy - 1);
+    g.fillTriangle(head[0] + 7, head[1] - 12, head[0] + 20, head[1] - 18, head[0] + 14, head[1] - 1);
 
-    g.generateTexture("head", W, H);
+    g.generateTexture("body", W, H);
     g.destroy();
-    this.registry.set("headOrigin", { x: cx / W, y: neckBase / H });
-  }
 
-  // The three other TORSO views (headless, same canvas/origin as makeBody):
-  //  - bodyBackProfile : back of the vest, side-on → the SWITCH resting stance
-  //  - bodyFront       : chest square to the camera → mid-frontside reveal
-  //  - bodyBack        : back square to the camera → mid-backside reveal
-  // The head is layered separately, always in profile, on top of all of them.
-  makeBodyViews() {
-    const W = 96;
-    const H = 130;
-    const vest = 0x223a4c;
-    const vestDk = 0x162a38;
-    const vestAccent = COLORS.rider;
-    const hip = [48, 122];
-    const shoulder = [48, 50];
-
-    // narrow vest trapezoid (matches makeBody's profile width)
-    const profileTorso = (g) => {
-      g.fillStyle(vest, 1);
-      g.beginPath();
-      g.moveTo(shoulder[0] - 16, shoulder[1] - 4);
-      g.lineTo(shoulder[0] + 16, shoulder[1] - 4);
-      g.lineTo(hip[0] + 13, hip[1]);
-      g.lineTo(hip[0] - 13, hip[1]);
-      g.closePath();
-      g.fillPath();
-    };
-    // wider, symmetric vest trapezoid for the square-to-camera views
-    const wideTorso = (g) => {
-      g.fillStyle(vest, 1);
-      g.beginPath();
-      g.moveTo(shoulder[0] - 20, shoulder[1] - 4);
-      g.lineTo(shoulder[0] + 20, shoulder[1] - 4);
-      g.lineTo(hip[0] + 15, hip[1]);
-      g.lineTo(hip[0] - 15, hip[1]);
-      g.closePath();
-      g.fillPath();
-      g.fillStyle(vestDk, 1);
-      g.fillRoundedRect(shoulder[0] - 20, shoulder[1] - 4, 9, 11, 3);
-      g.fillRoundedRect(shoulder[0] + 11, shoulder[1] - 4, 9, 11, 3);
-    };
-
-    // BACK-PROFILE (switch rest): plain back of the vest, side-on, no zip
-    const bp = this.g();
-    profileTorso(bp);
-    bp.fillStyle(vestDk, 1);
-    bp.fillRoundedRect(shoulder[0] - 3, shoulder[1], 6, 56, 3); // spine seam
-    bp.fillStyle(0x2d4a5e, 1);
-    bp.fillRect(shoulder[0] - 13, shoulder[1] + 14, 26, 3); // back yoke
-    bp.generateTexture("bodyBackProfile", W, H);
-    bp.destroy();
-
-    // FRONT (square to camera): chest zip
-    const f = this.g();
-    wideTorso(f);
-    f.fillStyle(vestAccent, 1);
-    f.fillRoundedRect(shoulder[0] - 7, shoulder[1], 14, 62, 5);
-    f.fillStyle(0xffffff, 0.14);
-    f.fillRoundedRect(shoulder[0] - 3, shoulder[1] + 4, 3, 52, 2);
-    f.generateTexture("bodyFront", W, H);
-    f.destroy();
-
-    // BACK (square to camera): plain back with a yoke + spine seam
-    const b = this.g();
-    wideTorso(b);
-    b.fillStyle(vestDk, 1);
-    b.fillRoundedRect(shoulder[0] - 4, shoulder[1], 8, 62, 3);
-    b.fillStyle(0x2d4a5e, 1);
-    b.fillRect(shoulder[0] - 18, shoulder[1] + 16, 36, 4);
-    b.generateTexture("bodyBack", W, H);
-    b.destroy();
+    // origin at the hip; shoulder offset (from hip) is where the arms attach
+    this.registry.set("bodyOrigin", { x: hip[0] / W, y: hip[1] / H });
+    this.registry.set("bodyShoulder", { x: shoulder[0] - hip[0], y: shoulder[1] - hip[1] });
   }
 
   // A proper wakeboard: long, thin, with upturned tips (spatulas) at BOTH ends
@@ -178,10 +90,10 @@ export default class BootScene extends Phaser.Scene {
     const H = 84;
     const cx = 100;
     const surf = 50; // board top surface inside the texture
-    const thick = 8;
+    const thick = 10;
     const x0 = 16;
     const x1 = 184; // board spans x0..x1
-    const tipRise = 15;
+    const tipRise = 7; // subtle rocker — the board reads as one piece, not tips + a flat plank
     const backX = cx - 31; // wide stance
     const frontX = cx + 31;
     const g = this.g();
@@ -190,11 +102,6 @@ export default class BootScene extends Phaser.Scene {
       const t = (x - cx) / ((x1 - x0) / 2);
       return surf - Math.pow(Math.min(1, Math.abs(t)), 2.3) * tipRise;
     };
-
-    // fins under the board
-    g.fillStyle(0x2f6b78, 1);
-    g.fillTriangle(cx - 36, surf + thick, cx - 22, surf + thick, cx - 29, surf + thick + 12);
-    g.fillTriangle(cx + 22, surf + thick, cx + 36, surf + thick, cx + 29, surf + thick + 12);
 
     // board body (continuous rocker, upturned both ends)
     g.fillStyle(COLORS.board, 1);
@@ -234,14 +141,27 @@ export default class BootScene extends Phaser.Scene {
     });
   }
 
-  // Kicker ramp that sits on the water and launches the rider.
-  makeKicker() {
-    // A clean triangular kicker floating on the water: flat ride-up face
-    // (the hypotenuse) rising from the water on the left to the lip on the
-    // top-right. The rider glides up this face and launches off the lip.
-    const w = 240; // keep in sync with config.KICKER_WIDTH
-    const rise = 122; // keep in sync with config.KICKER_RISE
-    const h = rise + 12;
+  // Generate one procedural texture per distinct segment texture in the module
+  // catalogue (no binary assets). Drawn once, keyed by the segment's `texture`.
+  makeModuleTextures() {
+    const seen = new Set();
+    for (const m of MODULES) {
+      for (const s of m.segments) {
+        if (seen.has(s.texture)) continue;
+        seen.add(s.texture);
+        if (s.kind === "ride-up") this.drawRideUp(s);
+        else if (s.kind === "grind") this.drawGrind(s);
+        else if (s.kind === "decor") this.drawDecor(s);
+      }
+    }
+  }
+
+  // A triangular kicker floating on the water: flat ride-up face rising from the
+  // water (left) to the lip (top-right). The rider glides up and launches off.
+  drawRideUp(seg) {
+    const w = seg.width;
+    const rise = seg.rise;
+    const h = seg.height;
     const g = this.g();
 
     // ramp body (triangle A=bottom-left, B=top-right lip, C=bottom-right)
@@ -278,25 +198,88 @@ export default class BootScene extends Phaser.Scene {
       g.strokePath();
     }
 
-    g.generateTexture("kicker", w, h);
+    g.generateTexture(seg.texture, w, h);
     g.destroy();
   }
 
-  // A slider/box that floats on the water — grindable.
-  makeRail() {
-    const w = 260;
-    const h = 70;
+  // A slider/box that floats on the water — grindable. Flat by default; a
+  // `slopeDrop` makes a descending down-slide, a `bow` makes a kink/rainbow rail.
+  drawGrind(seg) {
+    const w = seg.width;
+    const h = seg.height;
+    const color = seg.color ?? COLORS.rail;
+
+    if (!seg.slopeDrop && !seg.bow) {
+      // flat box — original rail look (kept identical for the standard rail).
+      const g = this.g();
+      g.fillStyle(COLORS.railLeg, 1);
+      g.fillRoundedRect(18, 24, 14, h - 24, 3);
+      g.fillRoundedRect(w - 32, 24, 14, h - 24, 3);
+      g.fillStyle(color, 1);
+      g.fillRoundedRect(0, 8, w, 22, 6);
+      g.fillStyle(0xffffff, 0.4);
+      g.fillRoundedRect(6, 11, w - 12, 5, 3);
+      g.generateTexture(seg.texture, w, h);
+      g.destroy();
+      return;
+    }
+
+    // curved/sloped surface: top edge follows yAt(x) across the width.
     const g = this.g();
-    // legs / floats
+    const yAt = (x) => {
+      const tx = x / w;
+      return 8 + seg.slopeDrop * tx - seg.bow * Math.sin(Math.PI * tx);
+    };
+    const N = 24;
+    // legs at both ends, down to the texture bottom
     g.fillStyle(COLORS.railLeg, 1);
-    g.fillRoundedRect(18, 24, 14, h - 24, 3);
-    g.fillRoundedRect(w - 32, 24, 14, h - 24, 3);
-    // top box
-    g.fillStyle(COLORS.rail, 1);
-    g.fillRoundedRect(0, 8, w, 22, 6);
+    g.fillRoundedRect(18, yAt(25) + 16, 14, h - (yAt(25) + 16), 3);
+    g.fillRoundedRect(w - 32, yAt(w - 25) + 16, 14, h - (yAt(w - 25) + 16), 3);
+    // surface band
+    g.fillStyle(color, 1);
+    g.beginPath();
+    g.moveTo(0, yAt(0));
+    for (let i = 1; i <= N; i++) g.lineTo((i / N) * w, yAt((i / N) * w));
+    for (let i = N; i >= 0; i--) g.lineTo((i / N) * w, yAt((i / N) * w) + 22);
+    g.closePath();
+    g.fillPath();
+    // gloss highlight
     g.fillStyle(0xffffff, 0.4);
-    g.fillRoundedRect(6, 11, w - 12, 5, 3);
-    g.generateTexture("rail", w, h);
+    g.beginPath();
+    g.moveTo(6, yAt(6) + 3);
+    for (let i = 1; i <= N; i++) g.lineTo(6 + (i / N) * (w - 12), yAt(6 + (i / N) * (w - 12)) + 3);
+    for (let i = N; i >= 0; i--) g.lineTo(6 + (i / N) * (w - 12), yAt(6 + (i / N) * (w - 12)) + 8);
+    g.closePath();
+    g.fillPath();
+    g.generateTexture(seg.texture, w, h);
+    g.destroy();
+  }
+
+  // Cosmetic descending face (the back of an A-frame): a right triangle from the
+  // lip (top-left) down to the water (bottom-right).
+  drawDecor(seg) {
+    const w = seg.width;
+    const h = seg.height;
+    const g = this.g();
+    g.fillStyle(COLORS.kicker, 1);
+    g.beginPath();
+    g.moveTo(0, 0);
+    g.lineTo(w, h);
+    g.lineTo(0, h);
+    g.closePath();
+    g.fillPath();
+    g.fillStyle(0x0d3f4f, 1);
+    g.beginPath();
+    g.moveTo(0, 0);
+    g.lineTo(w, h);
+    g.lineTo(w - 10, h);
+    g.lineTo(0, 10);
+    g.closePath();
+    g.fillPath();
+    // lip coping at the peak
+    g.fillStyle(COLORS.kickerTop, 1);
+    g.fillRoundedRect(0, -2, 30, 12, 4);
+    g.generateTexture(seg.texture, w, h);
     g.destroy();
   }
 

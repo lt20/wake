@@ -1,5 +1,18 @@
 import Phaser from "phaser";
 import * as C from "../config.js";
+import {
+  landingError,
+  isCleanLanding,
+  wipesOutOnWaterLanding,
+  countRotations,
+  scoreLanding,
+  buildTrickName,
+  surfaceSpinPoints,
+  grabName,
+} from "../physics.js";
+import { pickModule, moduleFootprint } from "../modules.js";
+import { difficultyForElapsed } from "../difficulty.js";
+import { audio } from "../audio.js";
 
 const DEG = Phaser.Math.DEG_TO_RAD;
 
@@ -15,6 +28,13 @@ export default class GameScene extends Phaser.Scene {
   }
 
   create() {
+    // Pull the camera back so the rider sits further away and the tow rope reads
+    // longer. Backgrounds are drawn oversized (by these margins) to fill the
+    // reveal. Gameplay math is in world units and is unaffected by the zoom.
+    this.cameras.main.setZoom(C.CAMERA_ZOOM);
+    this.mx = Math.ceil((C.VIRTUAL_WIDTH / 2) * (1 / C.CAMERA_ZOOM - 1)) + 24;
+    this.my = Math.ceil((C.VIRTUAL_HEIGHT / 2) * (1 / C.CAMERA_ZOOM - 1)) + 24;
+
     this.buildBackground();
     this.buildWater();
     this.buildRider();
@@ -24,17 +44,28 @@ export default class GameScene extends Phaser.Scene {
     this.speed = C.BASE_SPEED;
     this.state = RIDE;
 
+    // Stance: 0 = regular (as drawn), 1 = switch. A landed odd number of 180s
+    // flips it, so the rider keeps the opposite foot forward until the next one.
+    this.stance = 0;
+
+    // Load & pop charge ------------------------------------------------------
+    this.charging = false;
+    this.chargeTime = 0;
+    this.lastPopRelease = -10;
+
     // Air / trick state ------------------------------------------------------
     this.y = C.WATER_Y;
     this.vy = 0;
     this.flipDeg = 0;
     this.flipVel = 0;
-    this.spinDeg = 0; // spin accumulated during the CURRENT air (resets on land)
+    this.spinDeg = 0;
     this.spinVel = 0;
-    this.stanceYaw = 0; // persistent board azimuth: 0 = regular, 180 = switch
+    this.surfaceSpinDeg = 0; // monotonic grounded-spin total awaiting points
+    this.surfaceSpin180s = 0; // completed 180s already banked this surface session
     this.grabbing = false;
     this.grabTime = 0;
-    this.grabNamed = false;
+    this.didGrab = false; // a grab was held this airtime
+    this.grabDir = { x: 0, y: 0 }; // last held grab direction
     this.rampT = 0; // 0 on flat water, →1 climbing a kicker to the lip
     this.rampAngle = 0;
     this.prevState = RIDE;
@@ -45,7 +76,9 @@ export default class GameScene extends Phaser.Scene {
     this.comboTimer = 0;
     this.pending = 0; // points earned in the current airtime, awarded on clean land
     this.trickParts = []; // names accumulated this airtime
-    this.lastPopTap = -10;
+
+    // Difficulty (drives speed target, spawn gaps, module mix) ---------------
+    this.difficulty = difficultyForElapsed(0);
 
     // Features ---------------------------------------------------------------
     this.features = this.add.group();
@@ -55,9 +88,18 @@ export default class GameScene extends Phaser.Scene {
     this.activeRail = null; // rail the rider is currently grinding
     this.popHintGiven = false;
 
+    // Time-attack run timer
+    this.timeLeft = C.RUN_DURATION;
+
+    this._lastMult = 1; // for combo-up sound edge detection
+
     this.setupInput();
     this.emitScore();
     this.emitSpeed();
+    this.emitTime();
+
+    audio.startHum(); // cable tow drone for the run
+    this.events.once("shutdown", () => audio.stopHum());
 
     this.game.events.emit("message", "RIDE!", 900);
   }
@@ -68,16 +110,22 @@ export default class GameScene extends Phaser.Scene {
   buildBackground() {
     const W = C.VIRTUAL_WIDTH;
     const H = C.VIRTUAL_HEIGHT;
-    this.add.image(0, 0, "sky").setOrigin(0, 0).setDisplaySize(W, H).setScrollFactor(0);
+    const MX = this.mx;
+    const MY = this.my;
+    this.add
+      .image(-MX, -MY, "sky")
+      .setOrigin(0, 0)
+      .setDisplaySize(W + 2 * MX, H + 2 * MY)
+      .setScrollFactor(0);
 
     // sun glow
     this.add.circle(W * 0.78, 150, 70, C.COLORS.sun, 0.85).setScrollFactor(0);
     this.add.circle(W * 0.78, 150, 110, C.COLORS.sun, 0.18).setScrollFactor(0);
 
     this.clouds = [];
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 5; i++) {
       const cl = this.add
-        .image(Phaser.Math.Between(0, W), Phaser.Math.Between(60, 220), "cloud")
+        .image(Phaser.Math.Between(-MX, W + MX), Phaser.Math.Between(40, 220), "cloud")
         .setScrollFactor(0)
         .setAlpha(0.8)
         .setScale(Phaser.Math.FloatBetween(0.7, 1.4));
@@ -86,10 +134,13 @@ export default class GameScene extends Phaser.Scene {
     }
 
     this.hillsFar = this.add
-      .tileSprite(0, 150, W, 300, "hillsFar")
+      .tileSprite(-MX, 150, W + 2 * MX, 300, "hillsFar")
       .setOrigin(0, 0)
       .setScrollFactor(0);
-    this.hills = this.add.tileSprite(0, 180, W, 300, "hills").setOrigin(0, 0).setScrollFactor(0);
+    this.hills = this.add
+      .tileSprite(-MX, 180, W + 2 * MX, 300, "hills")
+      .setOrigin(0, 0)
+      .setScrollFactor(0);
 
     // single overhead cable line (the rider's tow rope hangs from a trolley
     // that rides along it). No pylons / hanging clutter.
@@ -100,10 +151,15 @@ export default class GameScene extends Phaser.Scene {
   buildWater() {
     const W = C.VIRTUAL_WIDTH;
     const H = C.VIRTUAL_HEIGHT;
-    // deep water block
-    this.add.rectangle(0, C.WATER_Y, W, H - C.WATER_Y, C.COLORS.waterDeep).setOrigin(0, 0).setScrollFactor(0);
+    const MX = this.mx;
+    const MY = this.my;
+    // deep water block (oversized to fill the zoomed-out reveal)
     this.add
-      .rectangle(0, C.WATER_Y, W, 60, C.COLORS.waterTop)
+      .rectangle(-MX, C.WATER_Y, W + 2 * MX, H + 2 * MY - C.WATER_Y, C.COLORS.waterDeep)
+      .setOrigin(0, 0)
+      .setScrollFactor(0);
+    this.add
+      .rectangle(-MX, C.WATER_Y, W + 2 * MX, 60, C.COLORS.waterTop)
       .setOrigin(0, 0)
       .setScrollFactor(0)
       .setAlpha(0.85);
@@ -126,19 +182,16 @@ export default class GameScene extends Phaser.Scene {
     //   - board (boots baked on) at the bottom
     //   - legs + arms: Graphics redrawn every frame (flex/extend, follow handle)
     //   - body: torso+head sprite hung off the hips, rotated for the lean
-    const headOrigin = this.registry.get("headOrigin") || { x: 0.5, y: 0.92 };
     this.legsGfx = this.add.graphics();
     this.armsGfx = this.add.graphics();
     this.board = this.add.image(0, -this.boardGeom.topLocalY, "board");
     this.body = this.add.image(0, 0, "body").setOrigin(bodyOrigin.x, bodyOrigin.y);
-    // head is a separate sprite kept in profile, layered over the torso
-    this.head = this.add.image(0, 0, "head").setOrigin(headOrigin.x, headOrigin.y);
 
     this.riderC = this.add
-      .container(C.RIDER_SCREEN_X, C.WATER_Y, [this.board, this.legsGfx, this.body, this.head, this.armsGfx])
+      .container(C.RIDER_SCREEN_X, C.WATER_Y, [this.board, this.legsGfx, this.body, this.armsGfx])
       .setDepth(11);
 
-    this.crouch = 0.42; // 0 = legs extended, 1 = deeply bent
+    this.crouch = 0.35; // 0 = legs extended, 1 = deeply bent
     this.lean = 0; // upper-body lean against the cable pull (radians)
     this.tuckLift = 0; // how far the board is pulled up toward the body (grab)
 
@@ -166,26 +219,44 @@ export default class GameScene extends Phaser.Scene {
   // Feature spawning (kickers & rails) — recycled as they scroll off-screen
   // ==========================================================================
   spawnFeature() {
-    const type = Phaser.Math.RND.pick(["kicker", "kicker", "rail"]);
-    const worldX = this.nextSpawnX;
-    let obj;
+    const def = pickModule(() => Phaser.Math.RND.frac(), this.difficulty);
+    const baseX = this.nextSpawnX;
 
-    if (type === "kicker") {
-      obj = this.add.image(0, C.WATER_Y, "kicker").setOrigin(0, 1).setDepth(5);
+    // Each segment is its own interactive (or decorative) piece at its offset,
+    // so composites reuse the per-piece kicker / rail physics directly.
+    for (const seg of def.segments) {
+      this.spawnSegment(def, seg, baseX + seg.offset);
+    }
+
+    const footprint = moduleFootprint(def);
+    const d = this.difficulty;
+    this.nextSpawnX = baseX + footprint + Phaser.Math.Between(d.gapMin, d.gapMax);
+    return def;
+  }
+
+  spawnSegment(def, seg, worldX) {
+    const obj = this.add
+      .image(0, 0, seg.texture)
+      .setOrigin(seg.origin.x, seg.origin.y)
+      .setDepth(def.depth);
+    obj.worldX = worldX;
+    obj.width0 = seg.width;
+    obj.moduleType = def.type;
+
+    if (seg.kind === "ride-up") {
       obj.featureType = "kicker";
-      obj.worldX = worldX;
-      obj.width0 = obj.width; // ride-up face spans the full width to the lip
-    } else {
-      obj = this.add.image(0, 0, "rail").setOrigin(0, 0).setDepth(5);
+      obj.rise = seg.rise; // per-feature climb height (big kicker / A-frame)
+      obj.y = C.WATER_Y; // origin (0,1) rests the ramp base on the water
+    } else if (seg.kind === "grind") {
       obj.featureType = "rail";
-      obj.worldX = worldX;
-      obj.width0 = obj.width;
-      obj.railTopY = C.WATER_Y - 64; // grind surface height
-      obj.y = obj.railTopY - 8;
+      obj.railTopY = C.WATER_Y - seg.surfaceDrop; // grind surface height
+      obj.y = obj.railTopY - seg.imageYOffset;
+    } else {
+      obj.featureType = "decor"; // non-interactive (A-frame back face)
+      obj.y = C.WATER_Y - seg.height;
     }
 
     this.features.add(obj);
-    this.nextSpawnX = worldX + obj.width0 + Phaser.Math.Between(C.SPAWN_GAP_MIN, C.SPAWN_GAP_MAX);
     return obj;
   }
 
@@ -207,11 +278,14 @@ export default class GameScene extends Phaser.Scene {
     this.gesture = { active: false, sx: 0, sy: 0, t0: 0, flicked: false };
 
     this.input.on("pointerdown", (p) => {
+      audio.resume(); // unlock audio on the first gesture
       this.gesture.active = true;
       this.gesture.sx = p.x;
       this.gesture.sy = p.y;
       this.gesture.t0 = this.time.now;
       this.gesture.flicked = false;
+      // on the ground, a held press loads the pop (released on pointerup)
+      this.beginCharge();
     });
 
     this.input.on("pointermove", (p) => {
@@ -224,17 +298,16 @@ export default class GameScene extends Phaser.Scene {
         this.gesture.sx = p.x;
         this.gesture.sy = p.y;
         this.gesture.flicked = true;
+        this.charging = false; // a swipe is a spin, not a load
       }
     });
 
-    this.input.on("pointerup", (p) => {
+    this.input.on("pointerup", () => {
       if (!this.gesture.active) return;
-      const dt = this.time.now - this.gesture.t0;
-      const dist = Math.hypot(p.x - this.gesture.sx, p.y - this.gesture.sy);
-      if (!this.gesture.flicked && dist < C.TAP_MAX_DIST && dt < C.TAP_MAX_TIME) {
-        this.doTap();
-      }
+      // release a held load into a pop (a quick tap = tiny load = small hop)
+      if (this.charging && !this.gesture.flicked) this.releasePop();
       this.gesture.active = false;
+      this.charging = false;
       this.grabbing = false;
     });
 
@@ -246,40 +319,128 @@ export default class GameScene extends Phaser.Scene {
       left: "LEFT",
       right: "RIGHT",
       space: "SPACE",
-      grab: "SHIFT",
+      // grabs: E=up (Method), X=down (Indy), S=left (Tail), D=right (Nose);
+      // combinations give Mute / Stalefish. Any of them held = grabbing.
+      grabUp: "E",
+      grabDown: "X",
+      grabLeft: "S",
+      grabRight: "D",
     });
     k.on("keydown-UP", () => this.doFlick(0, -100));
     k.on("keydown-DOWN", () => this.doFlick(0, 100));
     k.on("keydown-LEFT", () => this.doFlick(-100, 0));
     k.on("keydown-RIGHT", () => this.doFlick(100, 0));
-    k.on("keydown-SPACE", () => this.doTap());
+    k.on("keydown-SPACE", () => {
+      audio.resume();
+      this.beginCharge();
+    });
+    k.on("keyup-SPACE", () => {
+      if (this.charging) this.releasePop();
+    });
+    k.on("keydown-M", () => {
+      const muted = audio.toggleMute();
+      if (!muted) audio.startHum();
+      this.game.events.emit("message", muted ? "SON OFF" : "SON ON", 500);
+    });
   }
 
-  doTap() {
-    if (this.state === RIDE) {
-      this.lastPopTap = this.time.now / 1000;
-      this.launch(C.FLAT_OLLIE_VELOCITY, false);
-    } else if (this.state === GRIND) {
-      this.popOffRail(C.FLAT_OLLIE_VELOCITY * 0.7);
+  // Begin loading a pop. Only meaningful on a surface (water / kicker / rail);
+  // the charge builds each frame in updateState while held.
+  beginCharge() {
+    if (this.state === RIDE || this.state === GRIND) {
+      this.charging = true;
+      this.chargeTime = 0;
     }
   }
 
+  // 0..1 fraction of a full load.
+  chargeRatio() {
+    return Phaser.Math.Clamp(this.chargeTime / C.CHARGE_MAX_TIME, 0, 1);
+  }
+
+  // Release the loaded pop. Velocity scales with how long the load was held:
+  // a quick tap barely hops (enough to step onto a slide), a full load launches
+  // high. Off a kicker lip the pop is bigger and can be "perfect".
+  releasePop() {
+    const r = this.chargeRatio();
+    this.lastPopRelease = this.time.now / 1000;
+
+    if (this.state === GRIND) {
+      this.popOffRail(Phaser.Math.Linear(C.GRIND_POP_MIN, C.GRIND_POP_MAX, r));
+    } else if (this.state === RIDE) {
+      if (this.rampT > 0.02) {
+        // on a kicker face — a load released near the lip pops big + perfect
+        const perfect = this.rampT >= 0.72;
+        const v =
+          Phaser.Math.Linear(C.KICKER_POP_MIN, C.KICKER_POP_MAX, r) +
+          (perfect ? C.PERFECT_POP_BONUS : 0);
+        this.launch(v, perfect);
+      } else {
+        this.launch(Phaser.Math.Linear(C.POP_MIN_VELOCITY, C.POP_MAX_VELOCITY, r), false);
+      }
+    }
+    this.charging = false;
+    this.chargeTime = 0;
+    this.emitCharge();
+  }
+
   doFlick(dx, dy) {
-    if (this.state !== AIR) return;
-    if (Math.abs(dx) > Math.abs(dy)) {
-      // horizontal → spin (right = frontside +, left = backside -)
+    const horizontal = Math.abs(dx) > Math.abs(dy);
+
+    // In the air, rotation is driven by HELD arrow keys (see updateState AIR),
+    // not by flick impulses — so a flick does nothing airborne.
+    if (this.state === AIR) return;
+
+    // On the surface (water / kicker / slide): only SPINS are possible. A
+    // vertical flip gesture is ignored — flips are strictly an in-air move.
+    if (this.state === RIDE || this.state === GRIND) {
+      if (!horizontal) return;
       this.spinVel = Phaser.Math.Clamp(
-        this.spinVel + Math.sign(dx) * C.SPIN_IMPULSE,
+        this.spinVel + Math.sign(dx) * C.SURFACE_SPIN_IMPULSE,
         -C.ROT_MAX,
         C.ROT_MAX
       );
-    } else {
-      // vertical → flip (up = backroll -, down = frontroll +)
-      this.flipVel = Phaser.Math.Clamp(
-        this.flipVel + Math.sign(dy) * C.FLIP_IMPULSE,
-        -C.ROT_MAX,
-        C.ROT_MAX
-      );
+    }
+  }
+
+  // Any grab key currently held?
+  grabKeyDown() {
+    const k = this.keys;
+    return k.grabUp.isDown || k.grabDown.isDown || k.grabLeft.isDown || k.grabRight.isDown;
+  }
+
+  // The grab direction held in the air: E/S/D/X grab keys take priority,
+  // otherwise the current pointer's drag offset from where the hold began.
+  readGrabDir() {
+    const k = this.keys;
+    let x = (k.grabRight.isDown ? 1 : 0) - (k.grabLeft.isDown ? 1 : 0);
+    let y = (k.grabDown.isDown ? 1 : 0) - (k.grabUp.isDown ? 1 : 0);
+    if (x === 0 && y === 0 && this.gesture.active && !this.gesture.flicked) {
+      const p = this.input.activePointer;
+      x = p.x - this.gesture.sx;
+      y = p.y - this.gesture.sy;
+    }
+    return { x, y };
+  }
+
+  // Map the held grab to a pose: where along the board the back hand reaches
+  // (gx, board-local px; +nose / −tail) and how far the board tucks up (lift).
+  // This gives each grab a distinct silhouette.
+  grabPose() {
+    const d = this.grabDir;
+    switch (grabName(d.x, d.y)) {
+      case "Nose":
+        return { gx: 60, lift: 30 };
+      case "Tail":
+        return { gx: -60, lift: 30 };
+      case "Method":
+        return { gx: -30, lift: 50 };
+      case "Mute":
+        return { gx: 52, lift: 42 };
+      case "Stalefish":
+        return { gx: -52, lift: 42 };
+      default:
+        return { gx: 8, lift: 34 }; // Indy
     }
   }
 
@@ -291,6 +452,8 @@ export default class GameScene extends Phaser.Scene {
     this.vy = -velocity;
     this.crouch = 0; // legs snap straight to push off
     this.activeRail = null;
+    this.resetSurfaceSpin(); // spin in progress carries over via spinDeg/spinVel
+    audio.play(perfect ? "perfectPop" : "pop");
     if (perfect) {
       this.pending += C.PTS_PERFECT_POP;
       this.trickParts.push("Perfect Pop");
@@ -302,29 +465,40 @@ export default class GameScene extends Phaser.Scene {
     this.activeRail = null;
     this.state = AIR;
     this.vy = -velocity;
+    this.resetSurfaceSpin();
+    audio.play("pop");
   }
 
   land(clean, label) {
     if (clean) {
       // award the rotation itself (flips + spins), then the landing bonus
-      const flips = Math.round(Math.abs(this.flipDeg) / 360);
-      const spins = Math.round(Math.abs(this.spinDeg) / 180);
-      this.pending += flips * C.PTS_PER_FLIP + spins * C.PTS_PER_SPIN;
-      this.pending += C.PTS_PERFECT_LAND;
-      const gained = Math.round(this.pending * this.multiplier);
+      const { flips, spins } = countRotations(this.flipDeg, this.spinDeg);
+      const gained = scoreLanding({
+        flips,
+        spins,
+        pending: this.pending,
+        multiplier: this.multiplier,
+      });
       this.score += gained;
-      const name = this.buildTrickName();
+      if (this.didGrab) {
+        this.trickParts.push(`${grabName(this.grabDir.x, this.grabDir.y)} Grab`);
+      }
+      const name = buildTrickName({
+        flipDeg: this.flipDeg,
+        spinDeg: this.spinDeg,
+        extras: this.trickParts,
+      });
       this.multiplier += 1;
       this.comboTimer = C.COMBO_DECAY;
+      audio.play("land");
       if (name) this.game.events.emit("trick", name, gained, this.multiplier);
       if (label) this.game.events.emit("message", label, 600);
       this.emitScore();
       this.emitCombo();
     }
-    // bank the landed half-rotations into the persistent stance, so the rider
-    // rides away switch (other foot leading) after an odd number of 180s.
-    const landedSpin = Math.round(this.spinDeg / 180) * 180;
-    this.stanceYaw = (((this.stanceYaw + landedSpin) % 360) + 360) % 360;
+    // An odd number of half-rotations lands the rider switch: keep the opposite
+    // foot forward until another odd half-rotation flips the stance back.
+    if (Math.abs(Math.round(this.spinDeg / 180)) % 2 === 1) this.stance ^= 1;
     this.resetAir();
     this.state = RIDE;
     this.y = C.WATER_Y;
@@ -340,7 +514,10 @@ export default class GameScene extends Phaser.Scene {
     this.pending = 0;
     this.trickParts = [];
     this.grabbing = false;
+    this.charging = false;
+    this.stance = 0; // a bail resets you to a regular stance
     this.splash();
+    audio.play("wipeout");
     this.game.events.emit("message", "WIPEOUT!", 700, true);
     this.emitCombo();
   }
@@ -353,30 +530,51 @@ export default class GameScene extends Phaser.Scene {
     this.spinVel = 0;
     this.grabbing = false;
     this.grabTime = 0;
-    this.grabNamed = false;
+    this.didGrab = false; // a grab was held this airtime
+    this.grabDir = { x: 0, y: 0 }; // last held grab direction
     this.pending = 0;
     this.trickParts = [];
+    this.resetSurfaceSpin();
   }
 
-  // ==========================================================================
-  // Trick naming
-  // ==========================================================================
-  buildTrickName() {
-    const parts = [];
-    const flips = Math.round(Math.abs(this.flipDeg) / 360);
-    if (flips > 0) {
-      const dir = this.flipDeg < 0 ? "Backroll" : "Frontroll";
-      parts.push(flips > 1 ? `${dir} x${flips}` : dir);
+  // End the current grounded-spin session. spinDeg / spinVel are intentionally
+  // NOT cleared here so a spin in progress carries over into the air on a pop.
+  resetSurfaceSpin() {
+    this.surfaceSpinDeg = 0;
+    this.surfaceSpin180s = 0;
+  }
+
+  // Build the loaded pop while the button is held on a surface, feeding the HUD
+  // charge bar. Capped at a full load so it can't grow forever.
+  tickCharge(dt) {
+    if (!this.charging) return;
+    this.chargeTime = Math.min(C.CHARGE_MAX_TIME, this.chargeTime + dt);
+    this.emitCharge();
+  }
+
+  // Integrate a flat (yaw-only) spin while on the water or a module, banking
+  // points + a trick-feed entry per completed 180. This path never wipes out.
+  tickSurfaceSpin(dt) {
+    if (this.state !== RIDE && this.state !== GRIND) return;
+    if (this.spinVel === 0) return;
+
+    this.spinDeg += this.spinVel * dt;
+    this.surfaceSpinDeg += Math.abs(this.spinVel) * dt;
+    this.spinVel = Phaser.Math.Linear(this.spinVel, 0, C.SURFACE_SPIN_FRICTION * dt);
+    if (Math.abs(this.spinVel) < 2) this.spinVel = 0;
+
+    const done = Math.floor(this.surfaceSpinDeg / 180);
+    if (done > this.surfaceSpin180s) {
+      const gained = surfaceSpinPoints((done - this.surfaceSpin180s) * 180);
+      this.surfaceSpin180s = done;
+      this.score += gained;
+      this.multiplier += 1;
+      this.comboTimer = C.COMBO_DECAY;
+      this.emitScore();
+      this.emitCombo();
+      audio.play("surfaceSpin");
+      this.game.events.emit("trick", `Surface ${done * 180}`, gained, this.multiplier);
     }
-    const spins = Math.round(Math.abs(this.spinDeg) / 180) * 180;
-    if (spins >= 180) {
-      const dir = this.spinDeg > 0 ? "FS" : "BS";
-      parts.push(`${dir} ${spins}`);
-    }
-    // accumulated extras (grabs, perfect pop, grinds)
-    for (const t of this.trickParts) parts.push(t);
-    if (parts.length === 0) return null;
-    return parts.join(" + ");
   }
 
   // ==========================================================================
@@ -386,12 +584,27 @@ export default class GameScene extends Phaser.Scene {
     const dt = delta / 1000;
     if (dt > 0.05) return; // skip huge frame hitches
 
+    // run timer (time-attack) — counts down regardless of trick state; a
+    // wipeout never ends the run, only the clock running out does.
+    this.timeLeft -= dt;
+    if (this.timeLeft <= 0) {
+      this.timeLeft = 0;
+      this.emitTime();
+      this.endRun();
+      return;
+    }
+    this.emitTime();
+
+    // difficulty ramps with elapsed run time
+    this.difficulty = difficultyForElapsed(C.RUN_DURATION - this.timeLeft);
+
     // scroll the world
     this.scrollX += this.speed * dt;
 
-    // recover speed toward base after a bail
-    if (this.state !== WIPEOUT && this.speed < C.BASE_SPEED) {
-      this.speed = Math.min(C.BASE_SPEED, this.speed + C.SPEED_RECOVER * dt);
+    // climb toward (and recover after a bail relative to) the current speed target
+    const speedTarget = this.difficulty.speedTarget;
+    if (this.state !== WIPEOUT && this.speed < speedTarget) {
+      this.speed = Math.min(speedTarget, this.speed + C.SPEED_RECOVER * dt);
       this.emitSpeed();
     }
 
@@ -411,7 +624,9 @@ export default class GameScene extends Phaser.Scene {
     switch (this.state) {
       case RIDE:
         this.grabbing = false;
+        this.tickCharge(dt); // build the loaded pop while held
         this.rideKickerOrWater();
+        this.tickSurfaceSpin(dt); // flat spins on water + kicker ride-up
         this.spray.emitting = this.rampT === 0; // spray only on the flat water
         // combo decay on the ground
         if (this.multiplier > 1) {
@@ -428,22 +643,39 @@ export default class GameScene extends Phaser.Scene {
         this.vy += C.GRAVITY * dt;
         this.y += this.vy * dt;
 
-        // rotation
+        // rotation is HELD, not flicked: an arrow spins/flips while down and
+        // stops the instant it is released (velocity snaps to 0).
+        const kx = (this.keys.right.isDown ? 1 : 0) - (this.keys.left.isDown ? 1 : 0);
+        const ky = (this.keys.down.isDown ? 1 : 0) - (this.keys.up.isDown ? 1 : 0);
+        this.spinVel = kx * C.ROT_RATE;
+        this.flipVel = ky * C.ROT_RATE;
         this.flipDeg += this.flipVel * dt;
         this.spinDeg += this.spinVel * dt;
 
-        // grab (pointer held without flicking, in the air)
+        // grab: an E/S/D/X key held, or a pointer held without flicking
         const holding =
-          (this.gesture.active && !this.gesture.flicked && time - this.gesture.t0 > C.HOLD_MIN_TIME) ||
-          this.keys.grab.isDown;
+          this.grabKeyDown() ||
+          (this.gesture.active && !this.gesture.flicked && time - this.gesture.t0 > C.HOLD_MIN_TIME);
         this.grabbing = holding;
         if (holding) {
           this.grabTime += dt;
           this.pending += C.PTS_GRAB_PER_SEC * dt;
-          if (!this.grabNamed) {
-            this.trickParts.push("Indy Grab");
-            this.grabNamed = true;
-          }
+          this.didGrab = true;
+          // the held direction picks the grab (keyboard arrows, else pointer drag)
+          const d = this.readGrabDir();
+          if (d.x !== 0 || d.y !== 0) this.grabDir = d;
+        }
+
+        // feed the HUD rotation indicator (how close to an upright landing)
+        {
+          const { flipErr, spinErr } = landingError(this.flipDeg, this.spinDeg);
+          const ok = isCleanLanding(
+            flipErr,
+            spinErr,
+            C.LAND_FLIP_TOLERANCE,
+            C.LAND_SPIN_TOLERANCE
+          );
+          this.game.events.emit("rotation", { flipErr, spinErr, ok });
         }
 
         this.checkAirLanding();
@@ -452,10 +684,11 @@ export default class GameScene extends Phaser.Scene {
 
       case GRIND: {
         this.spray.emitting = false;
+        this.tickCharge(dt); // load a pop off the rail
         // accrue grind points + keep the rider level on the rail
         this.pending += C.PTS_GRIND_PER_SEC * dt;
-        this.flipDeg = Phaser.Math.Linear(this.flipDeg, 0, 0.3);
-        this.spinDeg = Phaser.Math.Linear(this.spinDeg, 0, 0.3);
+        this.flipDeg = Phaser.Math.Linear(this.flipDeg, 0, 0.3); // no flips on a rail
+        this.tickSurfaceSpin(dt); // but surface spins ARE allowed while grinding
         this.y = this.activeRail.railTopY;
         // reached the end of the rail?
         const railEndWorld = this.activeRail.worldX + this.activeRail.width0 - 30;
@@ -473,7 +706,6 @@ export default class GameScene extends Phaser.Scene {
         this.y = C.WATER_Y;
         if (this.wipeTimer <= 0) {
           this.resetAir();
-          this.stanceYaw = 0; // recover in a regular stance after a bail
           this.state = RIDE;
         }
         break;
@@ -485,15 +717,16 @@ export default class GameScene extends Phaser.Scene {
   rideKickerOrWater() {
     const k = this.kickerUnderRider();
     if (k) {
+      const rise = k.rise || C.KICKER_RISE; // per-kicker lip height
       const t = Phaser.Math.Clamp((this.scrollX - k.worldX) / k.width0, 0, 1);
       this.rampT = t;
-      this.y = C.WATER_Y - t * C.KICKER_RISE;
-      this.rampAngle = -Math.atan2(C.KICKER_RISE, k.width0); // nose-up tilt
+      this.y = C.WATER_Y - t * rise;
+      this.rampAngle = -Math.atan2(rise, k.width0); // nose-up tilt
       if (t >= 0.9) {
-        // reached the lip — pop! a tap timed here gives a perfect, bigger pop
-        const now = this.time.now / 1000;
-        const perfect = now - this.lastPopTap < C.POP_WINDOW;
-        this.launch(C.POP_VELOCITY + (perfect ? C.PERFECT_POP_BONUS : 0), perfect);
+        // reached the lip — pop! releasing a held load right here fires a big,
+        // "perfect" pop; rolling off without a load gives a small base pop.
+        if (this.charging) this.releasePop();
+        else this.launch(C.KICKER_POP_MIN, false);
       }
     } else {
       this.rampT = 0;
@@ -525,6 +758,7 @@ export default class GameScene extends Phaser.Scene {
         this.y = f.railTopY;
         this.vy = 0;
         this.crouch = 0.85; // bend on contact with the module
+        audio.play("grind");
         return;
       }
     }
@@ -536,21 +770,22 @@ export default class GameScene extends Phaser.Scene {
   }
 
   evaluateWaterLanding() {
-    const flipErr = Math.abs(((this.flipDeg % 360) + 540) % 360 - 180);
-    const spinErr = Math.abs(((this.spinDeg % 180) + 270) % 180 - 90);
-    const flipOk = flipErr <= C.LAND_FLIP_TOLERANCE;
-    const spinOk = spinErr <= C.LAND_SPIN_TOLERANCE;
-
-    if (this.grabbing) {
-      this.wipeout(); // never land while still holding a grab
+    const { flipErr, spinErr } = landingError(this.flipDeg, this.spinDeg);
+    // The sole wipeout path: still grabbing, or not upright enough on impact.
+    if (
+      wipesOutOnWaterLanding(
+        this.grabbing,
+        flipErr,
+        spinErr,
+        C.LAND_FLIP_TOLERANCE,
+        C.LAND_SPIN_TOLERANCE
+      )
+    ) {
+      this.wipeout();
       return;
     }
-    if (flipOk && spinOk) {
-      const perfect = flipErr < 14 && spinErr < 16;
-      this.land(true, perfect ? "PERFECT!" : "NICE!");
-    } else {
-      this.wipeout();
-    }
+    const perfect = flipErr < 14 && spinErr < 16;
+    this.land(true, perfect ? "PERFECT!" : "NICE!");
   }
 
   // ==========================================================================
@@ -569,15 +804,15 @@ export default class GameScene extends Phaser.Scene {
 
     for (const cl of this.clouds) {
       cl.x -= cl.drift * dt;
-      if (cl.x < -80) cl.x = C.VIRTUAL_WIDTH + 80;
+      if (cl.x < -this.mx - 80) cl.x = C.VIRTUAL_WIDTH + this.mx + 80;
     }
 
     // overhead cable
     this.cableGfx.clear();
     this.cableGfx.lineStyle(4, C.COLORS.cable, 1);
     this.cableGfx.beginPath();
-    this.cableGfx.moveTo(0, this.cableY - 2);
-    this.cableGfx.lineTo(C.VIRTUAL_WIDTH, this.cableY - 2);
+    this.cableGfx.moveTo(-this.mx, this.cableY - 2);
+    this.cableGfx.lineTo(C.VIRTUAL_WIDTH + this.mx, this.cableY - 2);
     this.cableGfx.strokePath();
 
     // animated foam line on the water
@@ -585,9 +820,10 @@ export default class GameScene extends Phaser.Scene {
     this.foam.lineStyle(4, C.COLORS.foam, 0.9);
     this.foam.beginPath();
     const t = this.time.now / 320;
-    for (let x = 0; x <= C.VIRTUAL_WIDTH; x += 18) {
+    const x0 = -this.mx;
+    for (let x = x0; x <= C.VIRTUAL_WIDTH + this.mx; x += 18) {
       const y = C.WATER_Y + Math.sin(x * 0.04 + t) * 4 + Math.sin(x * 0.11 + t * 1.7) * 2;
-      if (x === 0) this.foam.moveTo(x, y);
+      if (x === x0) this.foam.moveTo(x, y);
       else this.foam.lineTo(x, y);
     }
     this.foam.strokePath();
@@ -598,19 +834,16 @@ export default class GameScene extends Phaser.Scene {
     return Phaser.Math.Linear(62, 28, crouch);
   }
 
-  // Procedural SIDE-view legs. The knee bend stays toward the pull (+x) in both
-  // stances — the rider always leans back the same way. But the FEET mirror with
-  // `dir` so the leading foot (and its accent boot + lighter leg) visibly swaps
-  // sides on a switch landing, matching the mirrored board underneath.
-  // `fore` (0..1) foreshortens the stance toward nose-on through a spin.
-  drawLegs(hipX, hipY, ankleY, crouch, fore, dir) {
+  // Procedural legs: feet locked to the board, knees bend forward as the rider
+  // crouches. Drawn in the container's local space (origin = board top surface).
+  drawLegs(hipX, hipY, ankleY, crouch) {
     const g = this.legsGfx;
     g.clear();
     const shorts = 0xf2622c;
     const shortsDk = 0xc94e1f;
     const skin = 0xe7b48c;
     const skinDk = 0xcf9a72;
-    const kneeFwd = (8 + crouch * 34) * fore;
+    const kneeFwd = 6 + crouch * 30;
 
     const leg = (fx, thighC, shinC, w) => {
       const kx = (fx + hipX) / 2 + kneeFwd;
@@ -627,51 +860,10 @@ export default class GameScene extends Phaser.Scene {
       g.strokePath();
       g.fillStyle(thighC, 1);
       g.fillCircle(kx, ky, w / 2 - 1); // knee
-      g.fillStyle(shinC, 1);
-      g.fillCircle(fx, ankleY, (w - 4) / 2 - 1); // ankle — softens the boot join
     };
 
-    // back leg drawn first (behind), front (lighter) leg on top; both mirror
-    leg(this.boardGeom.backFootX * fore * dir, shortsDk, skinDk, 18);
-    leg(this.boardGeom.frontFootX * fore * dir, shorts, skin, 20);
-    g.fillStyle(shorts, 1);
-    const sw = 13 * Math.max(0.4, fore);
-    g.fillRoundedRect(hipX - sw, hipY - 8, sw * 2, 16, 7); // hips/seat
-  }
-
-  // FACING legs (rider seen front/back, board nose-on): both legs splay
-  // symmetrically from the hips down to the near-stacked feet, knees bowed out.
-  // `faceAmt` (0..1) grows the stance the more square-on the rider is.
-  drawLegsFacing(hipX, hipY, ankleY, crouch, faceAmt) {
-    const g = this.legsGfx;
-    g.clear();
-    const shorts = 0xf2622c;
-    const skin = 0xe7b48c;
-    const spread = 7 + 11 * faceAmt; // feet apart when fully square-on
-    const kneeOut = 5 + crouch * 5;
-
-    const leg = (side) => {
-      const fx = hipX + side * spread;
-      const kx = hipX + side * (spread + kneeOut);
-      const ky = (ankleY + hipY) / 2;
-      g.lineStyle(19, shorts, 1);
-      g.beginPath();
-      g.moveTo(hipX + side * 5, hipY);
-      g.lineTo(kx, ky);
-      g.strokePath();
-      g.lineStyle(15, skin, 1);
-      g.beginPath();
-      g.moveTo(kx, ky);
-      g.lineTo(fx, ankleY);
-      g.strokePath();
-      g.fillStyle(shorts, 1);
-      g.fillCircle(kx, ky, 8); // knee
-      g.fillStyle(skin, 1);
-      g.fillCircle(fx, ankleY, 6); // ankle
-    };
-
-    leg(-1);
-    leg(1);
+    leg(this.boardGeom.backFootX, shortsDk, skinDk, 18); // back leg (behind)
+    leg(this.boardGeom.frontFootX, shorts, skin, 20); // front leg
     g.fillStyle(shorts, 1);
     g.fillRoundedRect(hipX - 13, hipY - 8, 26, 16, 7); // hips/seat
   }
@@ -679,30 +871,24 @@ export default class GameScene extends Phaser.Scene {
   // Procedural arms: reach from the shoulders to the handle. Because the hand
   // point leads toward the cable, the arms naturally follow the handle as the
   // rider spins (the whole rig mirrors) and flips (the whole rig rotates).
-  drawArms(sx, sy, hx, hy, grabPt, dir = 1) {
+  drawArms(sx, sy, hx, hy, grabPt) {
     const g = this.armsGfx;
     g.clear();
     const skin = 0xe7b48c;
     const skinDk = 0xcf9a72;
 
     const armTo = (ox, tx, ty, color, w) => {
-      const ex = (sx + tx) / 2 + 6 * dir; // elbow leads forward (mirrors switch)
-      const ey = (sy + ty) / 2 + 6; // only a slight dip → arm reads long/extended
-      // upper arm (shoulder → elbow)
+      const ex = (sx + tx) / 2 + 4;
+      const ey = (sy + ty) / 2 + 10; // elbow dips
       g.lineStyle(w, color, 1);
       g.beginPath();
       g.moveTo(sx + ox, sy + 2);
       g.lineTo(ex + ox, ey);
-      g.strokePath();
-      // forearm (elbow → hand), slightly thinner for taper
-      g.lineStyle(w - 2, color, 1);
-      g.beginPath();
-      g.moveTo(ex + ox, ey);
       g.lineTo(tx, ty);
       g.strokePath();
       g.fillStyle(color, 1);
-      g.fillCircle(ex + ox, ey, w / 2 - 1); // elbow
-      g.fillCircle(tx, ty, w / 2 - 1); // hand / fist on the handle
+      g.fillCircle(ex + ox, ey, w / 2 - 1);
+      g.fillCircle(tx, ty, w / 2 - 2); // hand
     };
 
     if (grabPt) {
@@ -725,58 +911,6 @@ export default class GameScene extends Phaser.Scene {
     g.fillRoundedRect(hx - 3, hy - 12, 6, 24, 3);
   }
 
-  // FACING arms (rider square-on, front or back). Both arms drop symmetrically
-  // from the shoulders to the handle held low/centre. `front` shows the palonier
-  // and hands; `back` tucks the hands behind the body (only forearms peek out).
-  drawArmsFacing(sx, sy, hipX, lowY, faceAmt, front) {
-    const g = this.armsGfx;
-    g.clear();
-    const skin = 0xe7b48c;
-    const shoulderW = 6 + 14 * faceAmt; // shoulders spread as the rider squares up
-    const hx = hipX;
-    const hy = lowY;
-
-    const arm = (side) => {
-      const shx = sx + side * shoulderW;
-      const ex = (shx + hx) / 2 + side * (3 + 4 * faceAmt); // elbow bows out
-      const ey = (sy + hy) / 2 + 4;
-      g.lineStyle(12, skin, 1);
-      g.beginPath();
-      g.moveTo(shx, sy + 2);
-      g.lineTo(ex, ey);
-      g.strokePath();
-      g.lineStyle(10, skin, 1);
-      g.beginPath();
-      g.moveTo(ex, ey);
-      g.lineTo(hx, hy);
-      g.strokePath();
-      g.fillStyle(skin, 1);
-      g.fillCircle(ex, ey, 5); // elbow
-    };
-
-    arm(-1);
-    arm(1);
-
-    if (front) {
-      // hands + horizontal handle bar held across the body
-      g.fillStyle(skin, 1);
-      g.fillCircle(hx, hy, 6);
-      const half = 13;
-      g.lineStyle(6, 0x1c1c1c, 1);
-      g.beginPath();
-      g.moveTo(hx - half, hy);
-      g.lineTo(hx + half, hy);
-      g.strokePath();
-      g.fillStyle(C.COLORS.board, 1);
-      g.fillRoundedRect(hx - half, hy - 3, half * 2, 6, 3);
-    } else {
-      // back view: hands tuck behind the torso, just a hint of fists at the waist
-      g.fillStyle(skin, 1);
-      g.fillCircle(hx - 4, hy, 4);
-      g.fillCircle(hx + 4, hy, 4);
-    }
-  }
-
   updateRiderVisual() {
     const x = C.RIDER_SCREEN_X;
     const S = C.RIDER_SCALE;
@@ -787,7 +921,7 @@ export default class GameScene extends Phaser.Scene {
     if (this.state === RIDE && this.rampT === 0) riderY += Math.sin(this.time.now / 120) * 2;
 
     // ease the crouch toward a per-state target (event snaps override briefly)
-    let target = 0.42;
+    let target = 0.35;
     if (this.state === AIR) target = this.grabbing ? 0.6 : 0.5;
     else if (this.state === GRIND) target = 0.45;
     else if (this.state === WIPEOUT) target = 0.7;
@@ -800,86 +934,57 @@ export default class GameScene extends Phaser.Scene {
 
     // upper body leans back against the cable pull (stronger the faster you go)
     let leanTarget = 0;
-    if (this.state === RIDE) leanTarget = -0.28 * (0.6 + 0.4 * speedRatio);
-    else if (this.state === GRIND) leanTarget = -0.16;
+    if (this.state === RIDE) leanTarget = -0.2 * (0.55 + 0.45 * speedRatio);
+    else if (this.state === GRIND) leanTarget = -0.12;
     else if (this.state === WIPEOUT) leanTarget = 0.35;
     this.lean = Phaser.Math.Linear(this.lean, leanTarget, 0.12);
 
-    // applied flip rotation + the spin's yaw. yaw = persistent stance + this-air
-    // spin, so a landed 180 leaves the rider resting mirrored (switch stance).
-    // cw projects along the board's long axis; sw is the facing axis. Through the
-    // middle of a 180 the rider squares up to the camera — front (FS) or back (BS).
+    // applied rotation + spin facing. A spin mirrors the WHOLE rig (the rider
+    // turns around mid-air); the persistent switch stance is handled separately.
     const rot = this.state === RIDE ? this.rampAngle : this.flipDeg * DEG;
-    const Y = (this.stanceYaw + this.spinDeg) * DEG;
-    const cw = Math.cos(Y);
-    const sw = Math.sin(Y); // + = chest to camera, − = back to camera
-    const sideAmt = Math.abs(cw);
-    const faceAmt = Math.abs(sw);
-    const dir = cw >= 0 ? 1 : -1; // board facing (+1 = regular, −1 = switch)
-    const view = sideAmt >= faceAmt ? "side" : sw > 0 ? "front" : "back";
-    const fore = Math.max(0.1, sideAmt); // along-board foreshorten (unsigned)
-    const squeeze = dir * fore; // signed: mirrors the BOARD only (boots swap)
+    const facing = Math.cos(this.spinDeg * DEG); // -1..1
+    const sxFace = Math.max(0.28, Math.abs(facing)) * Math.sign(facing || 1);
 
-    // a grab pulls the board (and the locked-in feet) UP toward the body
-    const liftTarget = this.state === AIR && this.grabbing ? 34 : 0;
+    // Switch stance keeps the torso, arms and tow handle facing forward (the
+    // rider is still towed forward) and swaps ONLY the feet — so just the board
+    // and legs mirror. This is the correct switch pose (front foot changes side).
+    const stanceFlip = this.stance ? -1 : 1;
+
+    // a grab pulls the board (and the locked-in feet) UP toward the body; how
+    // far, and where the back hand reaches, depends on which grab is held
+    const pose = this.state === AIR && this.grabbing ? this.grabPose() : null;
+    const liftTarget = pose ? pose.lift : 0;
     this.tuckLift = Phaser.Math.Linear(this.tuckLift, liftTarget, 0.25);
 
-    // The upper-body POSE never mirrors: the rider always leans back against the
-    // pull (hips toward −x, weight on the heels). Only the board mirrors, which is
-    // what swaps the leading foot. Fore/aft offset foreshortens toward nose-on.
-    const hipX = -9 * fore;
+    // hips ride up/down with the crouch; the board+feet rise on a grab
+    const hipX = -4;
     const baseAnkle = this.boardGeom.bootTopY + 4;
     const hipY = baseAnkle - this.legLen(crouch); // body stays put
     const ankleY = baseAnkle - this.tuckLift; // feet + board lift on a grab
 
-    // board foreshortens to nose-on mid-spin AND mirrors for switch (boots swap)
     this.board.y = -this.boardGeom.topLocalY - this.tuckLift;
-    this.board.scaleX = squeeze;
-
-    // torso view by yaw quadrant: front-profile (regular) ↔ back-profile (switch)
-    // on the sides; chest/back square-to-camera through the spin reveals. Drawn in
-    // its final orientation, so no mirroring — the head + legs stay un-mirrored.
-    const bodyTex =
-      view === "side" ? (cw >= 0 ? "body" : "bodyBackProfile") : view === "front" ? "bodyFront" : "bodyBack";
-    if (this.body.texture.key !== bodyTex) this.body.setTexture(bodyTex);
+    this.board.setScale(stanceFlip, 1); // swap the accent (front) foot in switch
+    this.legsGfx.setScale(stanceFlip, 1); // legs cross to the swapped feet
     this.body.setPosition(hipX, hipY);
     this.body.setRotation(this.lean);
-    this.body.scaleX = view === "side" ? Math.max(0.22, sideAmt) : Math.max(0.34, faceAmt);
+    this.drawLegs(hipX, hipY, ankleY, crouch);
 
-    // shoulder anchor after the lean
+    // shoulder position after the lean, then the hand reaching for the handle
     const shoulderX = hipX + this.bodyShoulder.x * Math.cos(this.lean) - this.bodyShoulder.y * Math.sin(this.lean);
     const shoulderY = hipY + this.bodyShoulder.x * Math.sin(this.lean) + this.bodyShoulder.y * Math.cos(this.lean);
-
-    // head: always a right-facing profile, never mirrored, perched on the shoulder
-    this.head.setPosition(shoulderX, shoulderY);
-    this.head.setRotation(this.lean);
-
-    // legs + arms per view; keep the local hand point for the tow rope
-    let handLX, handLY;
-    if (view === "side") {
-      this.drawLegs(hipX, hipY, ankleY, crouch, fore, dir);
-      // hands always reach toward the pull (world +x): switch riders hold the
-      // handle behind them and look back over the shoulder, so the rope never
-      // crosses the body. Magnitude foreshortens as the rider turns.
-      handLX = shoulderX + 42 * Math.max(0.12, sideAmt);
-      handLY = shoulderY + 26;
-      const grabPt = this.state === AIR && this.grabbing ? { x: hipX + 6 * fore, y: ankleY + 2 } : null;
-      this.drawArms(shoulderX, shoulderY, handLX, handLY, grabPt, 1);
-    } else {
-      this.drawLegsFacing(hipX, hipY, ankleY, crouch, faceAmt);
-      handLX = hipX;
-      handLY = shoulderY + 34; // handle held low, toward the camera
-      this.drawArmsFacing(shoulderX, shoulderY, hipX, handLY, faceAmt, view === "front");
-    }
+    const handX = shoulderX + 30; // reach forward toward the pull
+    const handY = shoulderY - 2;
+    const grabPt = pose ? { x: pose.gx * stanceFlip, y: ankleY + 2 } : null;
+    this.drawArms(shoulderX, shoulderY, handX, handY, grabPt);
 
     this.riderC.setPosition(x, riderY);
     this.riderC.setRotation(rot);
-    this.riderC.setScale(S, S);
+    this.riderC.setScale(S * sxFace, S);
 
-    // tint cues on the body + head
-    if (this.state === WIPEOUT) { this.body.setTint(C.COLORS.bad); this.head.setTint(C.COLORS.bad); }
-    else if (this.state === GRIND) { this.body.setTint(0xfff1a8); this.head.setTint(0xfff1a8); }
-    else { this.body.clearTint(); this.head.clearTint(); }
+    // tint cues on the body
+    if (this.state === WIPEOUT) this.body.setTint(C.COLORS.bad);
+    else if (this.state === GRIND) this.body.setTint(0xfff1a8);
+    else this.body.clearTint();
 
     // spray follows the board on the water
     this.spray.setPosition(x - 36, C.WATER_Y - 4);
@@ -889,9 +994,9 @@ export default class GameScene extends Phaser.Scene {
     // the container transform so the rope always meets the hands.
     const cs = Math.cos(rot);
     const sn = Math.sin(rot);
-    const hwX = x + handLX * S * cs - handLY * S * sn;
-    const hwY = riderY + handLX * S * sn + handLY * S * cs;
-    this.trolley.x = x + 104 + speedRatio * 24; // pulls further ahead at speed
+    const hwX = x + handX * S * sxFace * cs - handY * S * sn;
+    const hwY = riderY + handX * S * sxFace * sn + handY * S * cs;
+    this.trolley.x = x + 172 + speedRatio * 34; // leads well ahead — a long tow rope
     this.rope.clear();
     this.rope.lineStyle(3, 0xeef6fa, 0.9);
     this.rope.beginPath();
@@ -932,11 +1037,25 @@ export default class GameScene extends Phaser.Scene {
   emitScore() {
     this.game.events.emit("score", this.score);
   }
+  emitCharge() {
+    this.game.events.emit("charge", this.chargeRatio(), this.charging);
+  }
   emitSpeed() {
     const ratio = (this.speed - C.MIN_SPEED) / (C.MAX_SPEED - C.MIN_SPEED);
     this.game.events.emit("speed", Phaser.Math.Clamp(ratio, 0, 1));
   }
   emitCombo() {
+    if (this.multiplier > 1 && this.multiplier > this._lastMult) audio.play("comboUp");
+    this._lastMult = this.multiplier;
     this.game.events.emit("combo", this.multiplier);
+  }
+  emitTime() {
+    this.game.events.emit("time", Math.max(0, this.timeLeft));
+  }
+
+  // End the run: tear down the HUD overlay and hand the final score to GameOver.
+  endRun() {
+    this.scene.stop("Hud");
+    this.scene.start("GameOver", { score: this.score });
   }
 }
