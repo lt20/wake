@@ -1,24 +1,63 @@
 import Phaser from "phaser";
 import { COLORS, VIRTUAL_WIDTH } from "../config.js";
 import { MODULES } from "../modules.js";
+import { ASSETS_ENABLED, IMAGE_ATLAS, RIDER_ANIMS } from "../assets.js";
 
-// Generates every visual procedurally so the game runs with zero asset files.
-// Each texture is hand-drawn with Graphics then baked. Swap for real art later.
+// "Fallback procedural" boot: OPTIONALLY load real art (see assets.js), then
+// generate — procedurally — any texture a real asset did not provide. With no
+// asset files (the default) every texture is generated exactly as before; drop
+// real art into public/assets and it takes over key-by-key with no code change.
 export default class BootScene extends Phaser.Scene {
   constructor() {
     super("Boot");
   }
 
+  preload() {
+    if (!ASSETS_ENABLED) return; // no asset files present → skip (avoid 404s)
+    // Missing files just fail to load; create() then fills the gap procedurally.
+    this.load.on("loaderror", () => {}); // swallow — fallback handles it
+    this.load.atlas(IMAGE_ATLAS.key, IMAGE_ATLAS.texture, IMAGE_ATLAS.atlas);
+  }
+
+  // Generate a texture procedurally only if a real asset did not already supply
+  // it, so loaded art wins and everything else falls back.
+  fallback(key, make) {
+    if (!this.textures.exists(key)) make.call(this);
+  }
+
   create() {
-    this.makeBody();
-    this.makeBoard();
-    this.makeModuleTextures();
-    this.makeParticles();
-    this.makeSky();
-    this.makeHills();
-    this.makeCloud();
+    this.fallback("body", this.makeBody);
+    this.fallback("bodyBack", this.makeBodyBack);
+    this.fallback("bodyProfile", this.makeBodyProfile);
+    this.fallback("board", this.makeBoard);
+    this.makeModuleTextures(); // per-key guarded internally
+    this.fallback("spray", this.makeParticles); // makes spray + spark
+    this.fallback("sky", this.makeSky);
+    this.fallback("hills", this.makeHills); // makes mountains + hillsFar + hills
+    this.fallback("cloud", this.makeCloud);
+    this.registerRiderAnims();
 
     this.scene.start("Menu");
+  }
+
+  // If a rider atlas was loaded, build the per-state animations that
+  // GameScene.applyRiderSkin() plays. A no-op with no atlas (procedural rider).
+  registerRiderAnims() {
+    if (!this.textures.exists(IMAGE_ATLAS.key)) return;
+    for (const [state, def] of Object.entries(RIDER_ANIMS)) {
+      const key = `rider_${state}`;
+      if (this.anims.exists(key)) continue;
+      this.anims.create({
+        key,
+        frames: this.anims.generateFrameNames(IMAGE_ATLAS.key, {
+          prefix: def.prefix,
+          start: 0,
+          end: def.end,
+        }),
+        frameRate: def.frameRate,
+        repeat: def.repeat,
+      });
+    }
   }
 
   g() {
@@ -35,7 +74,6 @@ export default class BootScene extends Phaser.Scene {
     const g = this.g();
 
     const skin = 0xe7b48c;
-    const hair = 0x2c2118;
     const vest = 0x223a4c;
     const vestAccent = COLORS.rider;
 
@@ -66,13 +104,25 @@ export default class BootScene extends Phaser.Scene {
     g.lineTo(head[0], head[1] + 10);
     g.strokePath();
 
-    // head + hair
+    // head + helmet (near-universal at a cable park, especially on the modules)
+    const helmet = 0x1c2b3a;
+    const RAD = Phaser.Math.DEG_TO_RAD;
     g.fillStyle(skin, 1);
     g.fillCircle(head[0], head[1], 14);
-    g.fillStyle(hair, 1);
-    g.slice(head[0], head[1] - 1, 15, Phaser.Math.DEG_TO_RAD * 168, Phaser.Math.DEG_TO_RAD * 372, false);
+    // helmet dome over the top ~2/3 of the head
+    g.fillStyle(helmet, 1);
+    g.slice(head[0], head[1], 16, RAD * 150, RAD * 390, false);
     g.fillPath();
-    g.fillTriangle(head[0] + 7, head[1] - 12, head[0] + 20, head[1] - 18, head[0] + 14, head[1] - 1);
+    // accent stripe + a small ear pad, plus a chin strap down to the jaw
+    g.fillStyle(vestAccent, 1);
+    g.fillRoundedRect(head[0] - 15, head[1] - 4, 30, 4, 2);
+    g.fillStyle(helmet, 1);
+    g.fillCircle(head[0] - 10, head[1] + 4, 5); // ear pad
+    g.lineStyle(3, helmet, 1);
+    g.beginPath();
+    g.moveTo(head[0] - 12, head[1] + 6);
+    g.lineTo(head[0] - 4, head[1] + 13);
+    g.strokePath();
 
     g.generateTexture("body", W, H);
     g.destroy();
@@ -80,6 +130,150 @@ export default class BootScene extends Phaser.Scene {
     // origin at the hip; shoulder offset (from hip) is where the arms attach
     this.registry.set("bodyOrigin", { x: hip[0] / W, y: hip[1] / H });
     this.registry.set("bodyShoulder", { x: shoulder[0] - hip[0], y: shoulder[1] - hip[1] });
+  }
+
+  // The SAME upper body seen from BEHIND — used when the rider is switch (after a
+  // 180). Identical silhouette/dimensions/origin so it drops straight in for the
+  // front "body", but no face: the back of the helmet, a nape of neck, and the
+  // vest's back panel + straps instead of the front zip. The rider is still towed
+  // to the right, so nothing here is mirrored.
+  makeBodyBack() {
+    const W = 96;
+    const H = 130;
+    const g = this.g();
+
+    const skin = 0xe7b48c;
+    const skinDk = 0xcf9a72;
+    const vest = 0x223a4c;
+    const vestAccent = COLORS.rider;
+
+    const hip = [48, 122];
+    const shoulder = [48, 50];
+    const head = [48, 26];
+
+    // torso / life vest (same trapezoid), slightly darker to read as the back
+    g.fillStyle(vest, 1);
+    g.beginPath();
+    g.moveTo(shoulder[0] - 16, shoulder[1] - 4);
+    g.lineTo(shoulder[0] + 16, shoulder[1] - 4);
+    g.lineTo(hip[0] + 13, hip[1]);
+    g.lineTo(hip[0] - 13, hip[1]);
+    g.closePath();
+    g.fillPath();
+    // back of the vest: two shoulder straps + a horizontal waist strap (no zip)
+    g.fillStyle(vestAccent, 1);
+    g.fillRoundedRect(shoulder[0] - 12, shoulder[1] + 2, 6, 48, 3);
+    g.fillRoundedRect(shoulder[0] + 6, shoulder[1] + 2, 6, 48, 3);
+    g.fillStyle(0x1a2e3c, 1);
+    g.fillRoundedRect(shoulder[0] - 14, shoulder[1] + 30, 28, 7, 3);
+    // spine shadow down the centre
+    g.fillStyle(0x000000, 0.12);
+    g.fillRect(shoulder[0] - 1, shoulder[1] + 2, 2, 48);
+
+    // neck (nape)
+    g.lineStyle(12, skinDk, 1);
+    g.beginPath();
+    g.moveTo(shoulder[0], shoulder[1]);
+    g.lineTo(head[0], head[1] + 10);
+    g.strokePath();
+
+    // head from behind: a thin nape of skin, the rest is the helmet dome — NO face
+    const helmet = 0x1c2b3a;
+    const RAD = Phaser.Math.DEG_TO_RAD;
+    g.fillStyle(skinDk, 1);
+    g.fillCircle(head[0], head[1], 14);
+    g.fillStyle(helmet, 1);
+    g.slice(head[0], head[1], 16, RAD * 120, RAD * 60, false); // dome wraps most of the head
+    g.fillPath();
+    // helmet back seam + accent stripe (centred, since we face the back)
+    g.fillStyle(vestAccent, 1);
+    g.fillRoundedRect(head[0] - 15, head[1] - 4, 30, 4, 2);
+    g.lineStyle(2, 0x0f1a24, 1);
+    g.beginPath();
+    g.moveTo(head[0], head[1] - 15);
+    g.lineTo(head[0], head[1] + 8);
+    g.strokePath();
+
+    g.generateTexture("bodyBack", W, H);
+    g.destroy();
+  }
+
+  // The SAME upper body seen from the SIDE, facing screen-RIGHT (toward the
+  // tow). Shown transiently mid-spin so a 180 reads as a real turn — front →
+  // quarter → PROFILE → quarter → back — instead of a texture pop at 90°.
+  // Same canvas/origin as "body"; drawn full width here, the runtime applies
+  // the yaw squash. Mirrored (scaleX < 0) when the rider faces screen-left.
+  makeBodyProfile() {
+    const W = 96;
+    const H = 130;
+    const g = this.g();
+
+    const skin = 0xe7b48c;
+    const skinDk = 0xcf9a72;
+    const vest = 0x223a4c;
+    const vestAccent = COLORS.rider;
+
+    const hip = [48, 122];
+    const shoulder = [48, 50];
+    const head = [48, 26];
+
+    // torso from the side: same trapezoid so the silhouette lines up, chest
+    // (right edge) slightly proud, back (left edge) flatter
+    g.fillStyle(vest, 1);
+    g.beginPath();
+    g.moveTo(shoulder[0] - 13, shoulder[1] - 4);
+    g.lineTo(shoulder[0] + 15, shoulder[1] - 4);
+    g.lineTo(hip[0] + 13, hip[1]);
+    g.lineTo(hip[0] - 11, hip[1]);
+    g.closePath();
+    g.fillPath();
+    // front-of-vest seam down the chest edge (right side), where the zip turns
+    g.fillStyle(vestAccent, 1);
+    g.fillRoundedRect(shoulder[0] + 5, shoulder[1], 8, 52, 4);
+    // near-arm shoulder root reads as the deltoid over the vest
+    g.fillStyle(0x1a2e3c, 1);
+    g.fillCircle(shoulder[0], shoulder[1] + 5, 9);
+
+    // neck
+    g.lineStyle(11, skin, 1);
+    g.beginPath();
+    g.moveTo(shoulder[0], shoulder[1]);
+    g.lineTo(head[0], head[1] + 10);
+    g.strokePath();
+
+    // head in profile: face (nose + jaw) to the right, helmet wraps the rest
+    const helmet = 0x1c2b3a;
+    const RAD = Phaser.Math.DEG_TO_RAD;
+    g.fillStyle(skin, 1);
+    g.fillCircle(head[0], head[1], 14);
+    // nose sticks out toward the pull
+    g.fillTriangle(head[0] + 12, head[1] + 1, head[0] + 19, head[1] + 5, head[0] + 11, head[1] + 8);
+    // helmet dome: covers the back + top, leaves the face arc (right) open
+    g.fillStyle(helmet, 1);
+    g.slice(head[0], head[1], 16, RAD * 100, RAD * 295, false);
+    g.fillPath();
+    // accent stripe along the side of the shell + the ear pad + chin strap
+    g.fillStyle(vestAccent, 1);
+    g.fillRoundedRect(head[0] - 15, head[1] - 4, 24, 4, 2);
+    g.fillStyle(helmet, 1);
+    g.fillCircle(head[0] - 2, head[1] + 6, 5); // ear pad (near side)
+    g.lineStyle(3, helmet, 1);
+    g.beginPath();
+    g.moveTo(head[0] - 2, head[1] + 9);
+    g.lineTo(head[0] + 6, head[1] + 13);
+    g.strokePath();
+    // eye dot so the profile clearly reads as a face
+    g.fillStyle(0x22303c, 1);
+    g.fillCircle(head[0] + 9, head[1] + 1, 1.6);
+    // back-of-neck shading ties the profile to the darker back view
+    g.lineStyle(3, skinDk, 1);
+    g.beginPath();
+    g.moveTo(head[0] - 5, head[1] + 12);
+    g.lineTo(shoulder[0] - 4, shoulder[1] - 2);
+    g.strokePath();
+
+    g.generateTexture("bodyProfile", W, H);
+    g.destroy();
   }
 
   // A proper wakeboard: long, thin, with upturned tips (spatulas) at BOTH ends
@@ -149,6 +343,7 @@ export default class BootScene extends Phaser.Scene {
       for (const s of m.segments) {
         if (seen.has(s.texture)) continue;
         seen.add(s.texture);
+        if (this.textures.exists(s.texture)) continue; // a real asset supplied it
         if (s.kind === "ride-up") this.drawRideUp(s);
         else if (s.kind === "grind") this.drawGrind(s);
         else if (s.kind === "decor") this.drawDecor(s);
@@ -183,9 +378,12 @@ export default class BootScene extends Phaser.Scene {
     g.closePath();
     g.fillPath();
 
-    // bright lip / coping at the top of the ramp
-    g.fillStyle(COLORS.kickerTop, 1);
-    g.fillRoundedRect(w - 30, h - rise - 6, 30, 14, 4);
+    // bright lip highlight — a thin edge along the top face (no protruding box)
+    g.lineStyle(3, COLORS.kickerTop, 1);
+    g.beginPath();
+    g.moveTo(w - 34, h - rise + Math.round((34 / w) * rise));
+    g.lineTo(w, h - rise);
+    g.strokePath();
 
     // surface grip lines along the ride face
     g.lineStyle(3, 0x0a3a48, 0.5);
@@ -276,9 +474,12 @@ export default class BootScene extends Phaser.Scene {
     g.lineTo(0, 10);
     g.closePath();
     g.fillPath();
-    // lip coping at the peak
-    g.fillStyle(COLORS.kickerTop, 1);
-    g.fillRoundedRect(0, -2, 30, 12, 4);
+    // thin lip highlight along the top edge (no protruding box)
+    g.lineStyle(3, COLORS.kickerTop, 1);
+    g.beginPath();
+    g.moveTo(0, 1);
+    g.lineTo(30, Math.round((30 / w) * h) + 1);
+    g.strokePath();
     g.generateTexture(seg.texture, w, h);
     g.destroy();
   }
@@ -335,6 +536,7 @@ export default class BootScene extends Phaser.Scene {
       g.generateTexture(key, w, h);
       g.destroy();
     };
+    drawHills("mountains", 0x1a4a5e, 96, 150, 22); // farthest, tallest, desaturated
     drawHills("hillsFar", COLORS.hillsFar, 38, 150, 16);
     drawHills("hills", COLORS.hills, 64, 210, 12);
   }

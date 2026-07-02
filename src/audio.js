@@ -39,6 +39,10 @@ export const SOUNDS = {
     voices: [{ type: "sine", f0: 520, f1: 720, dur: 0.16, gain: 0.12 }],
     noise: { dur: 0.16, gain: 0.06, filter: { type: "bandpass", freq: 1800 } },
   },
+  carve: {
+    // spray hiss of an edge digging in — a short rising bandpass whoosh
+    noise: { dur: 0.3, gain: 0.1, filter: { type: "bandpass", freq: 1400 } },
+  },
 };
 
 export function soundSpec(name) {
@@ -49,8 +53,11 @@ export class AudioEngine {
   constructor() {
     this.ctx = null;
     this.master = null;
+    this.musicBus = null; // separate gain so music can duck under SFX
     this.hum = null;
     this._noise = null;
+    this.samples = {}; // name → decoded AudioBuffer (optional real SFX/music)
+    this.music = null; // { src, name } currently playing loop
     this.muted = loadMuted();
   }
 
@@ -64,7 +71,78 @@ export class AudioEngine {
     this.master = this.ctx.createGain();
     this.master.gain.value = this.muted ? 0 : 1;
     this.master.connect(this.ctx.destination);
+    this.musicBus = this.ctx.createGain();
+    this.musicBus.gain.value = 0.6; // music sits under the SFX
+    this.musicBus.connect(this.master);
     return this.ctx;
+  }
+
+  // Decode + register a real audio sample under `name`. Once present, play(name)
+  // prefers it over the synth voice. Safe no-op until the context exists.
+  async loadSample(name, arrayBuffer) {
+    const ctx = this._ensure();
+    if (!ctx || !arrayBuffer) return;
+    try {
+      this.samples[name] = await ctx.decodeAudioData(arrayBuffer);
+    } catch (e) {
+      // undecodable — leave the synth fallback in place
+    }
+  }
+
+  // Fetch + decode the sample files declared in a manifest ({ name: [urls] }).
+  // Only real, reachable files register; everything else keeps the synth.
+  async loadSamplesFrom(manifest) {
+    if (!manifest) return;
+    await Promise.all(
+      Object.entries(manifest).map(async ([name, urls]) => {
+        for (const url of urls) {
+          try {
+            const buf = await fetch(url).then((r) => (r.ok ? r.arrayBuffer() : null));
+            if (buf) {
+              await this.loadSample(name, buf);
+              return;
+            }
+          } catch (e) {
+            /* try the next format */
+          }
+        }
+      })
+    );
+  }
+
+  // Play a one-shot sample buffer through a destination bus.
+  _playBuffer(buffer, dest, { loop = false, gain = 1 } = {}) {
+    const ctx = this.ctx;
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.loop = loop;
+    const g = ctx.createGain();
+    g.gain.value = gain;
+    src.connect(g).connect(dest);
+    src.start(ctx.currentTime);
+    return src;
+  }
+
+  // Start/replace the looping music track (by sample name). No-op if the track
+  // isn't loaded, so the game is silent-but-fine until real music is dropped in.
+  playMusic(name) {
+    if (this.muted || !this.ctx) return;
+    if (this.music && this.music.name === name) return; // already playing
+    this.stopMusic();
+    const buf = this.samples[name];
+    if (!buf) return; // no music asset — stay quiet (the cable hum still plays)
+    const src = this._playBuffer(buf, this.musicBus, { loop: true });
+    this.music = { src, name };
+  }
+
+  stopMusic() {
+    if (!this.music) return;
+    try {
+      this.music.src.stop();
+    } catch (e) {
+      /* already stopped */
+    }
+    this.music = null;
   }
 
   // Call on the first user gesture to create + unlock the context.
@@ -102,6 +180,11 @@ export class AudioEngine {
 
   play(name) {
     if (this.muted || !this.ctx) return;
+    // Prefer a real sample if one was loaded; otherwise synthesize the voice.
+    if (this.samples[name]) {
+      this._playBuffer(this.samples[name], this.master);
+      return;
+    }
     const spec = soundSpec(name);
     if (!spec) return;
     const ctx = this.ctx;
