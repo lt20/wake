@@ -111,8 +111,11 @@ export default class GameScene extends Phaser.Scene {
     this.grabTime = 0;
     this.didGrab = false; // a grab was held this airtime
     this.grabDir = { x: 0, y: 0 }; // last held grab direction
-    this.raley = false; // board kicked out behind this airtime (signature)
+    this.raley = false; // superman pose is LIVE (button held) right now
+    this.didRaley = false; // a Raley was thrown this airtime (naming/scoring)
     this.airSwitch = false; // took off switch this airtime
+    this.pressDir = 0; // rail press: +1 nose press (↑), −1 tail press (↓)
+    this.pressTime = 0; // how long the current press has been held (s)
     this.rampT = 0; // 0 on flat water, →1 climbing a kicker to the lip
     this.rampAngle = 0;
     this.prevState = RIDE;
@@ -281,6 +284,8 @@ export default class GameScene extends Phaser.Scene {
     this.crouch = 0.35; // 0 = legs extended, 1 = deeply bent
     this.lean = 0; // upper-body lean against the cable pull (radians)
     this.tuckLift = 0; // how far the board is pulled up toward the body (grab)
+    this.raleyAmt = 0; // 0..1 eased blend into the Raley superman pose
+    this.pressAmt = 0; // −1..1 eased rail-press pitch (+nose / −tail)
 
     // tow rope from a trolley on the overhead cable to the rider's handle
     this.rope = this.add.graphics().setDepth(9).setScrollFactor(0);
@@ -480,8 +485,8 @@ export default class GameScene extends Phaser.Scene {
 
   // Release the button. Off a rail it pops (scaled by the hold). On a kicker face
   // the pop is powered by the EDGE LOAD (built on the approach) and can be
-  // "perfect". On flat water there is no ollie — just a tiny, non-scoring hop to
-  // step onto a slide (the cable has no wake to jump off).
+  // "perfect". On flat water the release is a charge-scaled ollie — enough to
+  // pop up onto a module (a bare ollie stays non-scoring, see the `flat` flag).
   releasePop() {
     const r = this.chargeRatio();
     this.lastPopRelease = this.time.now / 1000;
@@ -501,7 +506,14 @@ export default class GameScene extends Phaser.Scene {
         );
         this.launch(v, perfect);
       } else {
-        this.launch(C.EDGE_FLAT_HOP, false, { flat: true });
+        // flat-water ollie: load the line and pop. Scales with the hold so a
+        // tap is a small hop and a full load clears up onto a box/module. Kept
+        // `flat` so an empty ollie (no trick) doesn't farm combo/landing points.
+        this.launch(
+          Phaser.Math.Linear(C.FLAT_OLLIE_MIN, C.FLAT_OLLIE_VELOCITY, r),
+          false,
+          { flat: true }
+        );
       }
     }
     this.charging = false;
@@ -635,6 +647,8 @@ export default class GameScene extends Phaser.Scene {
 
   popOffRail(velocity) {
     this.activeRail = null;
+    this.pressDir = 0;
+    this.pressTime = 0;
     this.state = AIR;
     this.vy = -velocity;
     this.edgedTakeoff = false;
@@ -655,7 +669,7 @@ export default class GameScene extends Phaser.Scene {
       // Bank the signature bonuses via `pending` so scoreLanding's tested
       // signature is untouched.
       this.pending += signatureBonus({
-        raley: this.raley,
+        raley: this.didRaley,
         tantrum,
         switchStance: this.airSwitch,
         landsBlind,
@@ -677,7 +691,7 @@ export default class GameScene extends Phaser.Scene {
         flipDeg: this.flipDeg,
         spinDeg: this.spinDeg,
         extras: this.trickParts,
-        raley: this.raley,
+        raley: this.didRaley,
         edged: this.edgedTakeoff,
         switchStance: this.airSwitch,
         landsBlind,
@@ -740,6 +754,7 @@ export default class GameScene extends Phaser.Scene {
     this.didGrab = false; // a grab was held this airtime
     this.grabDir = { x: 0, y: 0 }; // last held grab direction
     this.raley = false;
+    this.didRaley = false;
     this.airFlat = false;
     this.pending = 0;
     this.trickParts = [];
@@ -792,7 +807,8 @@ export default class GameScene extends Phaser.Scene {
     this.spinDeg += this.spinVel * dt;
     this.surfaceSpinDeg += Math.abs(this.spinVel) * dt;
     this.spinVel = Phaser.Math.Linear(this.spinVel, 0, C.SURFACE_SPIN_FRICTION * dt);
-    if (Math.abs(this.spinVel) < 2) this.spinVel = 0;
+    const stopped = Math.abs(this.spinVel) < 2;
+    if (stopped) this.spinVel = 0;
 
     const done = Math.floor(this.surfaceSpinDeg / 180);
     if (done > this.surfaceSpin180s) {
@@ -805,6 +821,15 @@ export default class GameScene extends Phaser.Scene {
       this.emitCombo();
       audio.play("surfaceSpin");
       this.game.events.emit("trick", `Surface ${done * 180}`, gained, this.multiplier);
+    }
+
+    // When the surface spin settles, fold a net odd 180 into the switch stance
+    // and normalize the facing to forward — so the rider is never left mirrored
+    // (riding backward) on the water; only the stance (front/back view) persists.
+    if (stopped) {
+      if (Math.abs(Math.round(this.spinDeg / 180)) % 2 === 1) this.stance ^= 1;
+      this.spinDeg = 0;
+      this.resetSurfaceSpin();
     }
   }
 
@@ -923,15 +948,19 @@ export default class GameScene extends Phaser.Scene {
         this.flipDeg += this.flipVel * dt;
         this.spinDeg += this.spinVel * dt;
 
-        // Raley: board kicked out behind, body extended — SPACE held (keyboard),
-        // or the grab finger yanked hard DOWN (touch). It doesn't wipe you out;
-        // you can ride it out. When triggered on touch it takes over the grab
-        // finger so it reads as a Raley, not an Indy.
+        // Raley: board kicked out behind, body extended — HELD via SPACE
+        // (keyboard) or the grab finger yanked hard DOWN (touch). Releasing
+        // lets the rider swing back under the bar progressively (raleyAmt
+        // eases down in updateRiderVisual); touching the water before the
+        // board is back under you is a wipeout (see evaluateWaterLanding).
+        // When triggered on touch it takes over the grab finger so it reads
+        // as a Raley, not an Indy.
         let raleyTouch = false;
         if (this.grabG.active && this.grabG.pointer) {
           if (this.grabG.pointer.y - this.grabG.sy > C.FLICK_MIN_DIST * 2.2) raleyTouch = true;
         }
-        if (this.keys.space.isDown || raleyTouch) this.raley = true;
+        this.raley = this.keys.space.isDown || raleyTouch; // live pose (held)
+        if (this.raley) this.didRaley = true; // sticky for naming/scoring
 
         // grab: E/S/D/X held, OR a second finger held (grab while the primary
         // finger spins), OR the primary finger held STILL (single-finger grab —
@@ -977,6 +1006,20 @@ export default class GameScene extends Phaser.Scene {
         this.pending += C.PTS_GRIND_PER_SEC * dt;
         this.flipDeg = Phaser.Math.Linear(this.flipDeg, 0, 0.3); // no flips on a rail
         this.tickSurfaceSpin(dt); // but surface spins ARE allowed while grinding
+        // Rail presses: hold ↑ for a NOSE press (weight over the nose, tail
+        // up) or ↓ for a TAIL press (nose up). Eased into the rig pitch in
+        // updateRiderVisual; worth bonus points on top of the grind rate.
+        const dir = (this.keys.up.isDown ? 1 : 0) - (this.keys.down.isDown ? 1 : 0);
+        if (dir !== this.pressDir) this.pressTime = 0; // switching resets the clock
+        this.pressDir = dir;
+        if (dir !== 0) {
+          this.pressTime += dt;
+          this.pending += C.PTS_PRESS_PER_SEC * dt;
+          const part = dir > 0 ? "Nose Press" : "Tail Press";
+          if (this.pressTime > C.PRESS_NAME_TIME && !this.trickParts.includes(part)) {
+            this.trickParts.push(part);
+          }
+        }
         this.y = this.activeRail.railTopY;
         // reached the end of the rail?
         const railEndWorld = this.activeRail.worldX + this.activeRail.width0 - 30;
@@ -1065,7 +1108,7 @@ export default class GameScene extends Phaser.Scene {
     // A trivial flat-water hop (no trick attempted) settles back down silently —
     // no score, no combo, no wipeout. Prevents the tiny "step onto a slide" hop
     // from farming landing points.
-    if (this.airFlat && this.flipDeg === 0 && this.spinDeg === 0 && !this.didGrab) {
+    if (this.airFlat && this.flipDeg === 0 && this.spinDeg === 0 && !this.didGrab && !this.didRaley) {
       this.airFlat = false;
       this.resetAir();
       this.state = RIDE;
@@ -1074,14 +1117,16 @@ export default class GameScene extends Phaser.Scene {
       return;
     }
     const { flipErr, spinErr } = landingError(this.flipDeg, this.spinDeg);
-    // The sole wipeout path: still grabbing, or not upright enough on impact.
+    // The sole wipeout path: still grabbing, still stretched out in a Raley
+    // (the board has not swung back under the rider), or not upright enough.
     if (
       wipesOutOnWaterLanding(
         this.grabbing,
         flipErr,
         spinErr,
         C.LAND_FLIP_TOLERANCE,
-        C.LAND_SPIN_TOLERANCE
+        C.LAND_SPIN_TOLERANCE,
+        this.raleyAmt > C.RALEY_LAND_MAX
       )
     ) {
       this.wipeout();
@@ -1150,6 +1195,9 @@ export default class GameScene extends Phaser.Scene {
     const shortsDk = 0xc94e1f;
     const skin = 0xe7b48c;
     const skinDk = 0xcf9a72;
+    // Knees ALWAYS bend forward (toward the nose / the pull). The legs are drawn
+    // once; switch/spin flips the whole container, so the knees stay forward
+    // relative to the (possibly reversed) body.
     const kneeFwd = 6 + crouch * 30;
 
     const leg = (fx, thighC, shinC, w) => {
@@ -1170,7 +1218,7 @@ export default class GameScene extends Phaser.Scene {
     };
 
     leg(this.boardGeom.backFootX, shortsDk, skinDk, 18); // back leg (behind)
-    leg(this.boardGeom.frontFootX, shorts, skin, 20); // front leg
+    leg(this.boardGeom.frontFootX, shorts, skin, 20); // front leg (accent)
     g.fillStyle(shorts, 1);
     g.fillRoundedRect(hipX - 13, hipY - 8, 26, 16, 7); // hips/seat
   }
@@ -1178,7 +1226,7 @@ export default class GameScene extends Phaser.Scene {
   // Procedural arms: reach from the shoulders to the handle. Because the hand
   // point leads toward the cable, the arms naturally follow the handle as the
   // rider spins (the whole rig mirrors) and flips (the whole rig rotates).
-  drawArms(sx, sy, hx, hy, grabPt, behind = false) {
+  drawArms(sx, sy, hx, hy, grabPt, behind = false, spinThrow = 0) {
     const g = this.armsGfx;
     g.clear();
     const skin = 0xe7b48c;
@@ -1204,10 +1252,19 @@ export default class GameScene extends Phaser.Scene {
       armTo(-4, grabPt.x, grabPt.y, skinDk, 11);
       armTo(4, hx, hy, skin, 12);
     } else if (behind) {
-      // handle pass: only ONE hand keeps the bar (routed behind the back); the
-      // free hand tucks toward the hip, reading as the mid-pass release.
+      // handle pass (backside only): ONE hand keeps the bar, routed behind the
+      // back (hx/hy already sit at the small of the back); the free hand tucks
+      // toward the hip, reading as the mid-pass release. Checked BEFORE the
+      // throw pose — on a held backside spin the pass is the story.
       armTo(-4, sx - 16, sy + 20, skinDk, 11);
       armTo(4, hx, hy, skin, 12);
+    } else if (spinThrow > 0.15) {
+      // throwing a 180: the front hand drives the handle while the back arm is
+      // flung out and up behind, sending the rotation (the shoulders lead).
+      const tx = sx - (16 + 30 * spinThrow);
+      const ty = sy - (14 + 34 * spinThrow);
+      armTo(-4, tx, ty, skinDk, 11); // thrown arm
+      armTo(4, hx, hy, skin, 12); // handle hand
     } else {
       armTo(-4, hx, hy, skinDk, 11);
       armTo(4, hx, hy, skin, 12);
@@ -1249,10 +1306,23 @@ export default class GameScene extends Phaser.Scene {
     if (this.state === AIR) target = this.grabbing ? 0.6 : 0.5;
     else if (this.state === GRIND) target = 0.45;
     else if (this.state === WIPEOUT) target = 0.7;
-    // a Raley kicks the board out behind with the body fully extended (legs long)
+    // a Raley is a superman: body fully extended (legs long), the whole rig
+    // pitched forward so the board kicks up behind, above the head (see rot).
     const raleyPose = this.state === AIR && this.raley;
     if (raleyPose) target = 0.02;
+    // A press rides with the knees bent deeper over the pressing end.
+    const pressTarget = this.state === GRIND ? this.pressDir : 0;
+    this.pressAmt = Phaser.Math.Linear(this.pressAmt || 0, pressTarget, C.PRESS_LERP);
+    if (this.state === GRIND) target += Math.abs(this.pressAmt) * 0.3;
     this.crouch = Phaser.Math.Clamp(Phaser.Math.Linear(this.crouch, target, 0.18), 0, 1);
+    // Committing to the Raley is a fast throw; swinging BACK under the bar
+    // after release is slower and deliberate — that recovery window is the
+    // risk (splash down mid-recovery and you wipe, see evaluateWaterLanding).
+    this.raleyAmt = Phaser.Math.Linear(
+      this.raleyAmt,
+      raleyPose ? 1 : 0,
+      raleyPose ? C.RALEY_IN_LERP : C.RALEY_RECOVER_LERP
+    );
 
     // legs pump gently against the water while cruising
     let crouch = this.crouch;
@@ -1268,16 +1338,48 @@ export default class GameScene extends Phaser.Scene {
     if (this.state === RIDE) leanTarget += this.edgeDir * this.edgeLoad * C.EDGE_LEAN_MAX;
     this.lean = Phaser.Math.Linear(this.lean, leanTarget, 0.12);
 
-    // applied rotation + spin facing. A spin mirrors the WHOLE rig (the rider
-    // turns around mid-air); the persistent switch stance is handled separately.
-    const rot = this.state === RIDE ? this.rampAngle : this.flipDeg * DEG;
-    const facing = Math.cos(this.spinDeg * DEG); // -1..1
-    const sxFace = Math.max(0.28, Math.abs(facing)) * Math.sign(facing || 1);
+    // applied rotation + spin facing. A SPIN transiently mirrors the whole rig
+    // (the rider physically rotates mid-move). In the air, blend in the Raley
+    // pitch: the rig tips forward so the torso + arms reach toward the handle and
+    // the legs + board swing up behind the head.
+    // On a rail the press tips the whole rig: nose press (+) = nose down /
+    // tail up, tail press (−) = nose up.
+    const rot =
+      this.state === RIDE
+        ? this.rampAngle
+        : this.flipDeg * DEG + this.raleyAmt * C.RALEY_PITCH + this.pressAmt * C.PRESS_PITCH;
+    // Signed visual yaw of the chest: 0 = facing the camera, +90 = chest toward
+    // the tow (a frontside quarter), 270/−90 = BACK toward the tow (backside).
+    // Riding switch shows the rider's back — a standing +180 folded in.
+    const yawDeg = this.spinDeg + (this.stance === 1 ? 180 : 0);
+    const facing = Math.cos(yawDeg * DEG); // 1 front view … −1 back view
+    const side = Math.sin(yawDeg * DEG); // +1 chest to the tow … −1 back to it
+    const yawNorm = ((yawDeg % 360) + 360) % 360;
+    // Body view for this yaw phase: front → quarter (squashed front) → PROFILE
+    // → quarter (squashed back) → back — five distinct reads across a 180
+    // instead of one pop at 90°. The profile faces the side the chest points to
+    // (mirroring ONLY the body sprite — the rig itself never mirrors: the rope
+    // stays toward the tow and the knees keep bending right).
+    let bodyTex = "body";
+    let bodyFlip = false;
+    if (yawNorm >= 130 && yawNorm <= 230) bodyTex = "bodyBack";
+    else if (yawNorm > 50 && yawNorm < 310) {
+      bodyTex = "bodyProfile";
+      bodyFlip = side < 0; // profile texture faces right (toward the tow)
+    }
+    // Per-part yaw squash: the torso is an ellipse seen from above (a profile
+    // is ~55% of the chest width, never a sliver), while the board and the
+    // legs DO pinch nearly edge-on at 90° — so mid-spin you see a wide body
+    // turning over a knife-edge board, like the real thing.
+    const bodyW = Math.hypot(facing, side * C.BODY_SIDE_W);
+    const boardW = Math.max(C.BOARD_EDGE_MIN_W, Math.abs(facing));
+    const legsW = Math.max(C.LEGS_EDGE_MIN_W, Math.abs(facing));
 
-    // Switch stance keeps the torso, arms and tow handle facing forward (the
-    // rider is still towed forward) and swaps ONLY the feet — so just the board
-    // and legs mirror. This is the correct switch pose (front foot changes side).
-    const stanceFlip = this.stance ? -1 : 1;
+    // How hard the rider is currently THROWING a spin (0..1). On a real 180 the
+    // shoulders send the rotation and the rider folds forward at the waist —
+    // this drives that fold + the arm throw, for both grounded and air 180s.
+    const spinThrow = Phaser.Math.Clamp(Math.abs(this.spinVel) / C.SPIN_THROW_REF, 0, 1);
+    crouch = Phaser.Math.Clamp(crouch + spinThrow * 0.14, 0, 1); // coil into the spin
 
     // a grab pulls the board (and the locked-in feet) UP toward the body; how
     // far, and where the back hand reaches, depends on which grab is held
@@ -1285,38 +1387,57 @@ export default class GameScene extends Phaser.Scene {
     const liftTarget = pose ? pose.lift : 0;
     this.tuckLift = Phaser.Math.Linear(this.tuckLift, liftTarget, 0.25);
 
-    // hips ride up/down with the crouch; the board+feet rise on a grab
-    const hipX = -4;
+    // hips ride up/down with the crouch; the board+feet rise on a grab.
+    // A press shifts the hips over the pressing end (nose = forward).
+    const hipX = -4 + this.pressAmt * 14;
     const baseAnkle = this.boardGeom.bootTopY + 4;
     const hipY = baseAnkle - this.legLen(crouch); // body stays put
     const ankleY = baseAnkle - this.tuckLift; // feet + board lift on a grab
 
     this.board.y = -this.boardGeom.topLocalY - this.tuckLift;
-    // Raley: shove the board out behind the rider (and a touch down).
-    this.board.x = Phaser.Math.Linear(this.board.x || 0, raleyPose ? -40 : 0, 0.25);
-    this.board.setScale(stanceFlip, 1); // swap the accent (front) foot in switch
-    this.legsGfx.setScale(stanceFlip, 1); // legs cross to the swapped feet
+    this.board.x = 0; // feet stay on the board; the Raley extends via the pitch
+    // Nothing is mirrored for stance — the rig always faces the tow (right). The
+    // knees are drawn bending forward and stay forward. Switch = a back-view body.
+    // Each part carries its own yaw squash (see bodyW/boardW/legsW above).
+    this.board.setScale(boardW, 1);
+    this.legsGfx.setScale(legsW, 1);
+    // While throwing a 180 the torso folds forward at the waist (+bodyRot); the
+    // shoulders lead, so the arms are attached at the folded shoulder position.
+    const bodyRot = this.lean + spinThrow * C.SPIN_FOLD_MAX;
+    this.body.setTexture(bodyTex);
+    this.body.setScale(bodyFlip ? -bodyW : bodyW, 1);
     this.body.setPosition(hipX, hipY);
-    this.body.setRotation(this.lean);
+    this.body.setRotation(bodyRot);
     this.drawLegs(hipX, hipY, ankleY, crouch);
 
-    // shoulder position after the lean, then the hand reaching for the handle
-    const shoulderX = hipX + this.bodyShoulder.x * Math.cos(this.lean) - this.bodyShoulder.y * Math.sin(this.lean);
-    const shoulderY = hipY + this.bodyShoulder.x * Math.sin(this.lean) + this.bodyShoulder.y * Math.cos(this.lean);
-    const handX = shoulderX + 30; // reach forward toward the pull
-    const handY = shoulderY - 2;
-    const grabPt = pose ? { x: pose.gx * stanceFlip, y: ankleY + 2 } : null;
-    // Handle pass: while spinning away in the air, the tow handle routes behind
-    // the back and swaps hands (visual only). Not grabbing takes priority.
-    const hp =
-      this.state === AIR && !grabPt
-        ? handlePassState(this.spinDeg, C.HANDLE_PASS_WINDOW_DEG)
-        : { behind: false, passProgress: 0 };
-    this.drawArms(shoulderX, shoulderY, handX, handY, grabPt, hp.behind);
+    // shoulder position after the fold, then the hand reaching for the handle
+    const shoulderX = hipX + this.bodyShoulder.x * Math.cos(bodyRot) - this.bodyShoulder.y * Math.sin(bodyRot);
+    const shoulderY = hipY + this.bodyShoulder.x * Math.sin(bodyRot) + this.bodyShoulder.y * Math.cos(bodyRot);
+    // gx is board-local; the container's rigFlipX mirrors it for switch/spin.
+    const grabPt = pose ? { x: pose.gx, y: ankleY + 2 } : null;
+    // Handle pass — DIRECTION-AWARE (signed yaw). Frontside the chest sweeps
+    // past the cable and the bar stays out front the whole 180; backside the
+    // rider turns his back to the cable, so the bar slides around to the small
+    // of the back (passProgress 0→1→0, deepest with the back square to the
+    // tow) and swaps hands. Visual only; a grab takes priority.
+    const hp = !grabPt ? handlePassState(yawDeg) : { behind: false, hand: 0, passProgress: 0 };
+    let handX = shoulderX + 30; // reach forward toward the pull
+    let handY = shoulderY - 2;
+    if (hp.passProgress > 0) {
+      // The bar stays tethered toward the tow, so behind-the-back it sits at
+      // the LUMBAR on the tow side (rig +X), low, between the back and the rope.
+      handX = Phaser.Math.Linear(handX, hipX + 12, hp.passProgress);
+      handY = Phaser.Math.Linear(handY, hipY - 12, hp.passProgress);
+    }
+    // Deep in the pass the bar + arms are routed BEHIND the rider: drop them
+    // under the legs/body so the torso occludes them, restore on top otherwise.
+    if (hp.passProgress > 0.5) this.riderC.moveTo(this.armsGfx, 1);
+    else this.riderC.bringToTop(this.armsGfx);
+    this.drawArms(shoulderX, shoulderY, handX, handY, grabPt, hp.behind, spinThrow);
 
     this.riderC.setPosition(x, riderY);
     this.riderC.setRotation(rot);
-    this.riderC.setScale(S * sxFace, S);
+    this.riderC.setScale(S, S); // yaw squash is per-part, not on the container
 
     // tint cues on the body
     if (this.state === WIPEOUT) this.body.setTint(C.COLORS.bad);
@@ -1335,8 +1456,8 @@ export default class GameScene extends Phaser.Scene {
     // the container transform so the rope always meets the hands.
     const cs = Math.cos(rot);
     const sn = Math.sin(rot);
-    const hwX = x + handX * S * sxFace * cs - handY * S * sn;
-    const hwY = riderY + handX * S * sxFace * sn + handY * S * cs;
+    const hwX = x + handX * S * cs - handY * S * sn;
+    const hwY = riderY + handX * S * sn + handY * S * cs;
     this.trolley.x = x + 172 + speedRatio * 34; // leads well ahead — a long tow rope
     this.rope.clear();
     this.rope.lineStyle(3, 0xeef6fa, 0.9);

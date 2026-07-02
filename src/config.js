@@ -30,7 +30,8 @@ export const AIR_MAX_FALL = 1500; // px/s terminal fall speed (floaty descent)
 export const POP_VELOCITY = 720; // base launch velocity off a kicker
 export const PERFECT_POP_BONUS = 320; // extra launch for a well-timed pop
 export const POP_WINDOW = 0.2; // seconds around the lip that count as "perfect"
-export const FLAT_OLLIE_VELOCITY = 600; // pop off flat water
+export const FLAT_OLLIE_MIN = 400; // quick tap: a small ollie off flat water
+export const FLAT_OLLIE_VELOCITY = 700; // full load: a big ollie (clears onto a module)
 
 // Load & pop (charge) --------------------------------------------------------
 // Hold the pop button to load the board; release to launch. A quick tap gives a
@@ -56,6 +57,23 @@ export const EDGE_LOAD_TIME = 1.1; // s of edging to reach a full load
 export const EDGE_DECAY_TIME = 1.8; // s for the load to bleed off once released
 export const EDGE_FLAT_HOP = 200; // tiny, non-scoring hop off flat water (onto a slide)
 export const EDGE_LEAN_MAX = 0.55; // rad of extra body lean at a full edge
+// Raley (superman): the whole rig pitches forward so the torso/arms extend
+// toward the handle while the legs + board kick up behind, above the head.
+// The pose is COMMITTED while SPACE is held; on release the rider swings back
+// under the bar progressively — touch down before the board is back under you
+// and you eat it.
+export const RALEY_PITCH = 1.8; // rad (~103°) the rig tips into the superman
+export const RALEY_IN_LERP = 0.22; // per-frame ease INTO the superman
+export const RALEY_RECOVER_LERP = 0.08; // per-frame swing BACK after release (slower)
+export const RALEY_LAND_MAX = 0.3; // raleyAmt above this on splashdown = wipeout
+
+// Rail presses: while grinding, hold ↑ for a NOSE press (weight over the nose,
+// tail up) or ↓ for a TAIL press (nose up). Worth bonus points on top of the
+// plain grind rate.
+export const PRESS_PITCH = 0.3; // rad the board tips into a press
+export const PRESS_LERP = 0.16; // per-frame ease into / out of the press
+export const PTS_PRESS_PER_SEC = 500; // bonus while pressing (on top of grind)
+export const PRESS_NAME_TIME = 0.25; // s held before the press names the trick
 
 // Kicker geometry — the rider climbs this triangular ramp to the lip
 export const KICKER_RISE = 122; // px the lip sits above the water
@@ -63,12 +81,20 @@ export const KICKER_WIDTH = 240; // horizontal length of the ramp
 
 // Rider rendering
 export const RIDER_SCALE = 0.82; // base display scale of the rider sprite
+// Yaw (spin) rendering: each part squashes with its own curve so a 180 reads
+// as a real turn — the torso is an ellipse seen from above (a profile view is
+// ~55% as wide as the chest), while the board and legs pinch to a near sliver
+// when seen end-on at 90°.
+export const BODY_SIDE_W = 0.55; // torso profile width relative to the front view
+export const BOARD_EDGE_MIN_W = 0.08; // board width floor when seen end-on
+export const LEGS_EDGE_MIN_W = 0.2; // legs width floor when seen end-on
 
 // Handle pass ----------------------------------------------------------------
-// The window (± degrees around each 180°) over which the tow handle reads as
-// passing behind the back. Visual only — a missed pass does NOT wipe you out
+// Direction matters: on a FRONTSIDE rotation the chest sweeps past the cable
+// and the bar stays in front the whole way; on a BACKSIDE rotation the rider
+// turns his back to the cable and must pass the bar behind his back (see
+// physics.handlePassState). Visual only — a missed pass does NOT wipe you out
 // (that would add an in-air wipeout path and break the landing invariant).
-export const HANDLE_PASS_WINDOW_DEG = 40;
 export const HANDLE_PASS_FAIL_ENABLED = false;
 
 // Trick rotation -------------------------------------------------------------
@@ -78,6 +104,10 @@ export const ROT_RATE = 480; // deg/s of held-key rotation in the air (stops on 
 export const SURFACE_SPIN_IMPULSE = 300; // deg/s per horizontal flick while grounded
 export const SURFACE_SPIN_FRICTION = 1.6; // per-second decay of grounded yaw velocity
 export const ROT_MAX = 1100; // clamp angular velocity (deg/s)
+// While actively throwing a 180 the rider folds forward at the waist and the
+// shoulders/arms lead the rotation (see the snowboard 180 reference).
+export const SPIN_FOLD_MAX = 0.62; // rad the torso folds forward at full spin
+export const SPIN_THROW_REF = 360; // yaw speed (deg/s) that reads as a "full" throw
 export const LAND_FLIP_TOLERANCE = 42; // deg from an upright multiple of 360
 export const LAND_SPIN_TOLERANCE = 48; // deg from a clean multiple of 180
 

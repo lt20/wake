@@ -66,6 +66,14 @@ describe("wipesOutOnWaterLanding", () => {
   it("does NOT wipe out on a clean, grab-free landing", () => {
     expect(wipesOutOnWaterLanding(false, 20, 20, 42, 48)).toBe(false);
   });
+
+  it("wipes out when splashing down still extended in a Raley", () => {
+    expect(wipesOutOnWaterLanding(false, 0, 0, 42, 48, true)).toBe(true);
+  });
+
+  it("lands clean once the Raley has swung back under the rider", () => {
+    expect(wipesOutOnWaterLanding(false, 0, 0, 42, 48, false)).toBe(false);
+  });
 });
 
 describe("surfaceSpinPoints", () => {
@@ -199,24 +207,33 @@ describe("edgeName", () => {
 
 describe("handlePassState", () => {
   it("holds the handle in front, lead hand, when facing forward", () => {
-    expect(handlePassState(0, 40)).toEqual({ behind: false, hand: 0, passProgress: 0 });
+    expect(handlePassState(0)).toEqual({ behind: false, hand: 0, passProgress: 0 });
   });
 
-  it("routes the handle behind the back at 180 (pass fully committed)", () => {
-    expect(handlePassState(180, 40)).toEqual({ behind: true, hand: 1, passProgress: 1 });
+  it("keeps the bar in FRONT through a frontside 180 (chest sweeps past the tow)", () => {
+    expect(handlePassState(60).behind).toBe(false);
+    expect(handlePassState(120).behind).toBe(false);
+    expect(handlePassState(180).behind).toBe(false);
   });
 
-  it("is behind through the away-facing arc and swaps hands at 180", () => {
-    expect(handlePassState(120, 40).behind).toBe(true);
-    expect(handlePassState(120, 40).hand).toBe(0);
-    expect(handlePassState(240, 40).hand).toBe(1);
-    expect(handlePassState(60, 40).behind).toBe(false);
+  it("routes the bar BEHIND the back through a backside 180, deepest at -90", () => {
+    expect(handlePassState(-60).behind).toBe(true);
+    expect(handlePassState(-120).behind).toBe(true);
+    expect(handlePassState(-90)).toEqual({ behind: true, hand: 1, passProgress: 1 });
+    expect(handlePassState(-45).passProgress).toBeCloseTo(Math.SQRT1_2, 5);
+    expect(handlePassState(-180).behind).toBe(false); // landed blind: bar back in front
   });
 
-  it("wraps across multiple turns and is sign-agnostic (mod 360)", () => {
-    expect(handlePassState(540, 40).behind).toBe(true); // 540 → 180
-    expect(handlePassState(-180, 40).behind).toBe(true);
-    expect(handlePassState(360, 40).behind).toBe(false); // full turn back to front
+  it("swaps hands each half turn", () => {
+    expect(handlePassState(120).hand).toBe(0);
+    expect(handlePassState(240).hand).toBe(1);
+  });
+
+  it("wraps across turns: a frontside 360 still passes the bar on its BACK half", () => {
+    expect(handlePassState(270).behind).toBe(true); // FS 360, three-quarters in
+    expect(handlePassState(360).behind).toBe(false); // full turn back to front
+    expect(handlePassState(540).behind).toBe(false); // 540 → 180: chest-side arc
+    expect(handlePassState(630).behind).toBe(true); // 630 → 270
   });
 });
 

@@ -20,10 +20,11 @@ export function isCleanLanding(flipErr, spinErr, flipTol, spinTol) {
 }
 
 // The ONLY path to a wipeout: an air→water landing, either while still holding a
-// grab or with the board too far from upright. Surface spins (RIDE/GRIND) never
-// route through here, so spinning on the ground can never wipe out.
-export function wipesOutOnWaterLanding(grabbing, flipErr, spinErr, flipTol, spinTol) {
-  if (grabbing) return true;
+// grab, still extended in a Raley (board not yet back under the rider), or with
+// the board too far from upright. Surface spins (RIDE/GRIND) never route
+// through here, so spinning on the ground can never wipe out.
+export function wipesOutOnWaterLanding(grabbing, flipErr, spinErr, flipTol, spinTol, raleyOut = false) {
+  if (grabbing || raleyOut) return true;
   return !isCleanLanding(flipErr, spinErr, flipTol, spinTol);
 }
 
@@ -103,17 +104,18 @@ export function airStep(y, vy, dt, { gravity, maxFall, apexLift = 0 }) {
   return { y: y + nvy * dt, vy: nvy };
 }
 
-// Handle-pass state for a given spin angle. On a real spin you pass the tow
-// handle behind your back as you rotate away from the boat/cable and swap it to
-// the other hand. Facing away (cos < 0, i.e. 90°–270° of each turn) the handle
-// is routed BEHIND the torso; `hand` names which hand holds it (swaps at 180°);
-// `passProgress` peaks (1) at the moment the handle is fully behind the back.
-export function handlePassState(spinDeg, windowDeg = 40) {
-  const norm = (((spinDeg % 360) + 360) % 360);
-  const behind = norm > 90 && norm < 270;
+// Handle-pass state for a signed visual yaw (deg). Convention: yaw 0 = chest
+// to the camera, +90 = chest toward the tow (screen right), 270/−90 = BACK to
+// the tow. Rotation DIRECTION matters: frontside (yaw 0→+180) sweeps the chest
+// past the cable so the bar stays in FRONT the whole way; backside (yaw 0→−180)
+// turns the rider's back to the cable, so the bar must be passed BEHIND the
+// back — deepest when the back squarely faces the tow (270). `passProgress` is
+// that continuous 0→1→0 depth; `hand` names the bar hand (swaps each 180).
+export function handlePassState(yawDeg) {
+  const norm = (((yawDeg % 360) + 360) % 360);
+  const behind = norm > 180 && norm < 360; // back is to the tow
   const hand = norm >= 180 ? 1 : 0;
-  const to180 = Math.abs(norm - 180);
-  const passProgress = windowDeg > 0 ? Math.max(0, 1 - to180 / windowDeg) : 0;
+  const passProgress = behind ? -Math.sin((norm * Math.PI) / 180) : 0;
   return { behind, hand, passProgress };
 }
 
